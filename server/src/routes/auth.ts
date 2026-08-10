@@ -1,13 +1,14 @@
 import { Router } from 'express';
 import { requireAuth } from '../middleware/auth';
 import { ApiError } from '../middleware/errorHandler';
+import { loginRateLimiter, signupRateLimiter } from '../middleware/rateLimit';
 import { prisma } from '../lib/prisma';
 import * as authService from '../services/auth.service';
 import { loginSchema, signupSchema, updateProfileSchema } from '../validators/auth';
 
 export const authRouter = Router();
 
-authRouter.post('/auth/signup', async (req, res, next) => {
+authRouter.post('/auth/signup', signupRateLimiter, async (req, res, next) => {
   try {
     const input = signupSchema.parse(req.body);
     const result = await authService.signup(input);
@@ -17,7 +18,7 @@ authRouter.post('/auth/signup', async (req, res, next) => {
   }
 });
 
-authRouter.post('/auth/login', async (req, res, next) => {
+authRouter.post('/auth/login', loginRateLimiter, async (req, res, next) => {
   try {
     const input = loginSchema.parse(req.body);
     const result = await authService.login(input);
