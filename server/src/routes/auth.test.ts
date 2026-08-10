@@ -55,6 +55,33 @@ describe('POST /auth/signup', () => {
 
     expect(res.status).toBe(409);
   });
+
+  it('rejects a duplicate email that only differs by case or whitespace', async () => {
+    await request(app).post('/auth/signup').send({
+      organizationName: 'Acme Corp',
+      email: 'dupe-case@acme.test',
+      password: 'super-secret-1',
+    });
+
+    const res = await request(app).post('/auth/signup').send({
+      organizationName: 'Other Corp',
+      email: '  Dupe-Case@Acme.Test  ',
+      password: 'super-secret-1',
+    });
+
+    expect(res.status).toBe(409);
+  });
+
+  it('stores the email normalized to lowercase', async () => {
+    const res = await request(app).post('/auth/signup').send({
+      organizationName: 'Acme Corp',
+      email: '  MixedCase@Acme.Test  ',
+      password: 'super-secret-1',
+    });
+
+    expect(res.status).toBe(201);
+    expect(res.body.user.email).toBe('mixedcase@acme.test');
+  });
 });
 
 describe('POST /auth/login', () => {
@@ -79,6 +106,21 @@ describe('POST /auth/login', () => {
       .send({ email: 'nobody@acme.test', password: 'whatever' });
 
     expect(res.status).toBe(401);
+  });
+
+  it('logs in when the email casing differs from how it was registered', async () => {
+    await request(app).post('/auth/signup').send({
+      organizationName: 'Acme Corp',
+      email: 'CaseSensitive@Acme.test',
+      password: 'super-secret-1',
+    });
+
+    const res = await request(app)
+      .post('/auth/login')
+      .send({ email: '  casesensitive@ACME.test  ', password: 'super-secret-1' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.token).toBeTruthy();
   });
 });
 
