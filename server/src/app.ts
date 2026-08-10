@@ -2,6 +2,7 @@ import express, { type Express } from 'express';
 import { pinoHttp } from 'pino-http';
 import { logger } from './lib/logger';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler';
+import { authRouter } from './routes/auth';
 import { healthRouter } from './routes/health';
 
 export function createApp(): Express {
@@ -12,6 +13,7 @@ export function createApp(): Express {
   app.use(pinoHttp({ logger }));
 
   app.use(healthRouter);
+  app.use(authRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);
