@@ -152,6 +152,21 @@ describe('GET /auth/me', () => {
     expect(res.body.user.email).toBe('user@acme.test');
     expect(res.body.organization.slug).toBe('acme-corp');
   });
+
+  it('never includes the password hash in the response', async () => {
+    const signupRes = await request(app).post('/auth/signup').send({
+      organizationName: 'Acme Corp',
+      email: 'nohash@acme.test',
+      password: 'super-secret-1',
+    });
+
+    const res = await request(app)
+      .get('/auth/me')
+      .set('Authorization', `Bearer ${signupRes.body.token}`);
+
+    expect(res.body.user).not.toHaveProperty('passwordHash');
+    expect(Object.keys(res.body.user).sort()).toEqual(['email', 'id', 'name']);
+  });
 });
 
 describe('PATCH /auth/me', () => {

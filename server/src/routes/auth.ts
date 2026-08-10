@@ -36,7 +36,12 @@ authRouter.get('/auth/me', requireAuth, async (req, res, next) => {
 
     const user = await prisma.user.findUnique({
       where: { id: req.auth.sub },
-      include: { organization: true },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        organization: { select: { id: true, name: true, slug: true } },
+      },
     });
 
     if (!user) {
@@ -45,7 +50,7 @@ authRouter.get('/auth/me', requireAuth, async (req, res, next) => {
 
     res.json({
       user: { id: user.id, email: user.email, name: user.name },
-      organization: { id: user.organization.id, name: user.organization.name, slug: user.organization.slug },
+      organization: user.organization,
     });
   } catch (err) {
     next(err);

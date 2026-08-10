@@ -1,6 +1,12 @@
-import { afterAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { prisma } from '../lib/prisma';
+import * as passwordLib from '../lib/password';
 import { login, signup } from './auth.service';
+
+vi.mock('../lib/password', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../lib/password')>();
+  return { ...actual, verifyPassword: vi.fn(actual.verifyPassword) };
+});
 
 async function resetDb() {
   await prisma.user.deleteMany();
@@ -89,5 +95,16 @@ describe('login', () => {
     await expect(
       login({ email: 'user2@acme.test', password: 'wrong-password' }),
     ).rejects.toMatchObject({ status: 401 });
+  });
+
+  it('runs a password comparison even when the email is unregistered, to avoid leaking account existence via timing', async () => {
+    const verifyPasswordSpy = vi.mocked(passwordLib.verifyPassword);
+    verifyPasswordSpy.mockClear();
+
+    await expect(
+      login({ email: 'nobody-at-all@acme.test', password: 'whatever' }),
+    ).rejects.toMatchObject({ status: 401 });
+
+    expect(verifyPasswordSpy).toHaveBeenCalledTimes(1);
   });
 });

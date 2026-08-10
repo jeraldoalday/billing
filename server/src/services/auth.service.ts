@@ -57,26 +57,36 @@ export async function signup(input: SignupInput): Promise<AuthResult> {
   };
 }
 
+// A precomputed bcrypt hash of a value nobody will ever type as a real
+// password. When the email isn't registered, we still run a full bcrypt
+// compare against this instead of short-circuiting, so response time for
+// "unknown email" and "known email, wrong password" is the same and an
+// attacker can't use login timing to enumerate registered emails.
+const UNKNOWN_USER_PASSWORD_HASH = '$2a$10$E1/zrzgMWPwVs4vtXO4AU.6ccu.3juC5mu3FNfmWycgNFwY0Uw.E2';
+
 export async function login(input: LoginInput): Promise<AuthResult> {
   const user = await prisma.user.findUnique({
     where: { email: input.email },
-    include: { organization: true },
+    select: {
+      id: true,
+      email: true,
+      name: true,
+      passwordHash: true,
+      organization: { select: { id: true, name: true, slug: true } },
+    },
   });
 
-  if (!user || !(await verifyPassword(input.password, user.passwordHash))) {
+  const passwordIsValid = await verifyPassword(input.password, user?.passwordHash ?? UNKNOWN_USER_PASSWORD_HASH);
+  if (!user || !passwordIsValid) {
     throw ApiError.unauthorized('Invalid email or password');
   }
 
-  const token = signAccessToken({ sub: user.id, orgId: user.organizationId, email: user.email });
+  const token = signAccessToken({ sub: user.id, orgId: user.organization.id, email: user.email });
 
   return {
     token,
     user: { id: user.id, email: user.email, name: user.name },
-    organization: {
-      id: user.organization.id,
-      name: user.organization.name,
-      slug: user.organization.slug,
-    },
+    organization: user.organization,
   };
 }
 
@@ -90,7 +100,7 @@ export async function updateProfile(
   userId: string,
   input: UpdateProfileInput,
 ): Promise<ProfileResult> {
-  const user = await prisma.user.findUnique({ where: { id: userId } });
+  const user = await prisma.user.findUnique({ where: { id: userId }, select: { id: true, passwordHash: true } });
   if (!user) {
     throw ApiError.unauthorized('Account no longer exists');
   }
@@ -110,7 +120,8 @@ export async function updateProfile(
       name: input.name ?? undefined,
       passwordHash,
     },
+    select: { id: true, email: true, name: true },
   });
 
-  return { id: updated.id, email: updated.email, name: updated.name };
+  return updated;
 }
