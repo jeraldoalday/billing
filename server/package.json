@@ -10,7 +10,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "prisma:generate": "prisma generate",
-    "prisma:migrate": "prisma migrate dev"
+    "prisma:migrate": "prisma migrate dev",
+    "test:migrate": "DATABASE_URL=\"file:./test.db\" prisma migrate deploy"
   },
   "dependencies": {
     "@prisma/client": "^5.18.0",
