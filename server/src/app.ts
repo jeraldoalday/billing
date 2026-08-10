@@ -1,0 +1,20 @@
+import express, { type Express } from 'express';
+import { pinoHttp } from 'pino-http';
+import { logger } from './lib/logger';
+import { errorHandler, notFoundHandler } from './middleware/errorHandler';
+import { healthRouter } from './routes/health';
+
+export function createApp(): Express {
+  const app = express();
+
+  app.disable('x-powered-by');
+  app.use(express.json());
+  app.use(pinoHttp({ logger }));
+
+  app.use(healthRouter);
+
+  app.use(notFoundHandler);
+  app.use(errorHandler);
+
+  return app;
+}
