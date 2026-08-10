@@ -3,7 +3,7 @@ import { hashPassword, verifyPassword } from '../lib/password';
 import { signAccessToken } from '../lib/jwt';
 import { prisma } from '../lib/prisma';
 import { slugify, withUniqueSuffix } from '../utils/slug';
-import type { LoginInput, SignupInput } from '../validators/auth';
+import type { LoginInput, SignupInput, UpdateProfileInput } from '../validators/auth';
 
 export interface AuthResult {
   token: string;
@@ -78,4 +78,39 @@ export async function login(input: LoginInput): Promise<AuthResult> {
       slug: user.organization.slug,
     },
   };
+}
+
+export interface ProfileResult {
+  id: string;
+  email: string;
+  name: string | null;
+}
+
+export async function updateProfile(
+  userId: string,
+  input: UpdateProfileInput,
+): Promise<ProfileResult> {
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  if (!user) {
+    throw ApiError.unauthorized('Account no longer exists');
+  }
+
+  let passwordHash: string | undefined;
+  if (input.newPassword) {
+    const currentPasswordValid = await verifyPassword(input.currentPassword ?? '', user.passwordHash);
+    if (!currentPasswordValid) {
+      throw ApiError.unauthorized('Current password is incorrect');
+    }
+    passwordHash = await hashPassword(input.newPassword);
+  }
+
+  const updated = await prisma.user.update({
+    where: { id: userId },
+    data: {
+      name: input.name ?? undefined,
+      passwordHash,
+    },
+  });
+
+  return { id: updated.id, email: updated.email, name: updated.name };
 }

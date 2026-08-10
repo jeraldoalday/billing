@@ -111,3 +111,69 @@ describe('GET /auth/me', () => {
     expect(res.body.organization.slug).toBe('acme-corp');
   });
 });
+
+describe('PATCH /auth/me', () => {
+  async function signupAndGetToken() {
+    const res = await request(app).post('/auth/signup').send({
+      organizationName: 'Acme Corp',
+      email: 'user@acme.test',
+      password: 'super-secret-1',
+    });
+    return res.body.token as string;
+  }
+
+  it('rejects requests with no token', async () => {
+    const res = await request(app).patch('/auth/me').send({ name: 'New Name' });
+
+    expect(res.status).toBe(401);
+  });
+
+  it('updates the display name', async () => {
+    const token = await signupAndGetToken();
+
+    const res = await request(app)
+      .patch('/auth/me')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ name: 'New Name' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.user.name).toBe('New Name');
+  });
+
+  it('rejects a password change without the current password', async () => {
+    const token = await signupAndGetToken();
+
+    const res = await request(app)
+      .patch('/auth/me')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ newPassword: 'brand-new-secret' });
+
+    expect(res.status).toBe(400);
+  });
+
+  it('rejects a password change with the wrong current password', async () => {
+    const token = await signupAndGetToken();
+
+    const res = await request(app)
+      .patch('/auth/me')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ currentPassword: 'wrong', newPassword: 'brand-new-secret' });
+
+    expect(res.status).toBe(401);
+  });
+
+  it('changes the password and allows logging in with the new one', async () => {
+    const token = await signupAndGetToken();
+
+    const patchRes = await request(app)
+      .patch('/auth/me')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ currentPassword: 'super-secret-1', newPassword: 'brand-new-secret' });
+    expect(patchRes.status).toBe(200);
+
+    const loginRes = await request(app)
+      .post('/auth/login')
+      .send({ email: 'user@acme.test', password: 'brand-new-secret' });
+    expect(loginRes.status).toBe(200);
+  });
+});

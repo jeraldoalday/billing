@@ -3,7 +3,7 @@ import { requireAuth } from '../middleware/auth';
 import { ApiError } from '../middleware/errorHandler';
 import { prisma } from '../lib/prisma';
 import * as authService from '../services/auth.service';
-import { loginSchema, signupSchema } from '../validators/auth';
+import { loginSchema, signupSchema, updateProfileSchema } from '../validators/auth';
 
 export const authRouter = Router();
 
@@ -46,6 +46,20 @@ authRouter.get('/auth/me', requireAuth, async (req, res, next) => {
       user: { id: user.id, email: user.email, name: user.name },
       organization: { id: user.organization.id, name: user.organization.name, slug: user.organization.slug },
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+authRouter.patch('/auth/me', requireAuth, async (req, res, next) => {
+  try {
+    if (!req.auth) {
+      throw ApiError.unauthorized();
+    }
+
+    const input = updateProfileSchema.parse(req.body);
+    const user = await authService.updateProfile(req.auth.sub, input);
+    res.json({ user });
   } catch (err) {
     next(err);
   }
