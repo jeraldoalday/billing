@@ -16,7 +16,9 @@ model Organization {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  users User[]
+  users    User[]
+  products Product[]
+  plans    Plan[]
 
   @@map("organizations")
 }
@@ -33,4 +35,72 @@ model User {
 
   @@index([organizationId])
   @@map("users")
+}
+
+/// A sellable thing (e.g. "Pro Plan API access"). A Product groups one or
+/// more Plans, which hold the actual pricing.
+model Product {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String
+  description    String?
+  active         Boolean      @default(true)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  plans Plan[]
+
+  @@index([organizationId])
+  @@map("products")
+}
+
+/// A priced way to buy a Product. Pricing is a discriminated shape keyed by
+/// `pricingModel`: FLAT uses `flatAmount`, USAGE uses `usageMetric` +
+/// `usageUnitAmount`, TIERED uses `usageMetric` + the related PriceTiers.
+/// Amounts are integer minor currency units (e.g. cents) to avoid float math.
+///
+/// SQLite has no native enum type, so `pricingModel` (PricingModel:
+/// FLAT/TIERED/USAGE) and `interval` (BillingInterval: DAY/WEEK/MONTH/YEAR)
+/// are plain strings whose values are constrained by Zod — see
+/// src/domain/pricing.ts.
+model Plan {
+  id              String       @id @default(cuid())
+  organizationId  String
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  productId       String
+  product         Product      @relation(fields: [productId], references: [id], onDelete: Cascade)
+  name            String
+  pricingModel    String
+  interval        String
+  currency        String       @default("usd")
+  flatAmount      Int?
+  usageMetric     String?
+  usageUnitAmount Int?
+  active          Boolean      @default(true)
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  tiers PriceTier[]
+
+  @@index([organizationId])
+  @@index([productId])
+  @@map("plans")
+}
+
+/// One graduated usage band of a TIERED Plan. `upTo` is the inclusive upper
+/// bound of usage quantity billed at `unitAmount` per unit within this band;
+/// `null` marks the last, unbounded tier. `order` fixes ascending band order.
+model PriceTier {
+  id         String @id @default(cuid())
+  planId     String
+  plan       Plan   @relation(fields: [planId], references: [id], onDelete: Cascade)
+  order      Int
+  upTo       Int?
+  unitAmount Int
+  flatFee    Int    @default(0)
+
+  @@unique([planId, order])
+  @@index([planId])
+  @@map("price_tiers")
 }
