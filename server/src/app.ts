@@ -5,6 +5,7 @@ import { logger } from './lib/logger';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler';
 import { authRouter } from './routes/auth';
 import { healthRouter } from './routes/health';
+import { productsRouter } from './routes/products';
 
 export function createApp(): Express {
   const app = express();
@@ -16,6 +17,7 @@ export function createApp(): Express {
 
   app.use(healthRouter);
   app.use(authRouter);
+  app.use('/products', productsRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);
