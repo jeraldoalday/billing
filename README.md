@@ -51,7 +51,7 @@ next — including for the automated daily build (see `AGENT.md`).
 
 - [x] Day 1: Repo scaffolding, tooling, Express skeleton, Prisma init
 - [x] Day 2: Auth (signup/login, JWT, org-scoped tenancy, profile update)
-- [ ] Day 3: Products, plans, and pricing models (flat/tiered/usage-based)
+- [x] Day 3: Products, plans, and pricing models (flat/tiered/usage-based)
 - [ ] Day 4: Customers and subscription lifecycle (create/upgrade/downgrade/cancel/trial, proration)
 - [ ] Day 5: Invoicing engine (line items, tax, numbering, status state machine)
 - [ ] Day 6: Payments via a mock gateway abstraction, retries
