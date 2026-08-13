@@ -16,9 +16,11 @@ model Organization {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  users    User[]
-  products Product[]
-  plans    Plan[]
+  users         User[]
+  products      Product[]
+  plans         Plan[]
+  customers     Customer[]
+  subscriptions Subscription[]
 
   @@map("organizations")
 }
@@ -81,7 +83,8 @@ model Plan {
   createdAt       DateTime     @default(now())
   updatedAt       DateTime     @updatedAt
 
-  tiers PriceTier[]
+  tiers         PriceTier[]
+  subscriptions Subscription[]
 
   @@index([organizationId])
   @@index([productId])
@@ -103,4 +106,78 @@ model PriceTier {
   @@unique([planId, order])
   @@index([planId])
   @@map("price_tiers")
+}
+
+/// A billable party within an Organization. One Customer may hold multiple
+/// Subscriptions (e.g. to different products) over time.
+model Customer {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String
+  email          String
+  active         Boolean      @default(true)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  subscriptions Subscription[]
+
+  @@unique([organizationId, email])
+  @@index([organizationId])
+  @@map("customers")
+}
+
+/// A Customer's subscription to a Plan. `status` (SubscriptionStatus:
+/// TRIALING/ACTIVE/PAST_DUE/CANCELED) and billing period bounds drive
+/// invoice generation (Day 5) and the recurring billing runner (Day 10).
+/// SQLite has no native enum type, so `status` is a plain string constrained
+/// by Zod — see src/domain/subscription.ts.
+///
+/// `cancelAt` marks a scheduled end-of-period cancellation requested while
+/// the subscription is still TRIALING/ACTIVE; `canceledAt` marks the moment
+/// the subscription actually stopped (immediate cancellation, or the day the
+/// billing runner processes a scheduled one).
+model Subscription {
+  id                 String       @id @default(cuid())
+  organizationId     String
+  organization       Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  customerId         String
+  customer           Customer     @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  planId             String
+  plan               Plan         @relation(fields: [planId], references: [id])
+  status             String
+  currentPeriodStart DateTime
+  currentPeriodEnd   DateTime
+  trialEnd           DateTime?
+  cancelAt           DateTime?
+  canceledAt         DateTime?
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+
+  events SubscriptionEvent[]
+
+  @@index([organizationId])
+  @@index([customerId])
+  @@index([planId])
+  @@map("subscriptions")
+}
+
+/// An immutable audit trail entry for a Subscription lifecycle transition.
+/// `prorationAmount` (signed, minor currency units) is populated for
+/// PLAN_CHANGED events — positive means the customer owes more for the rest
+/// of the period, negative means they're owed a credit. Later days (5, 8, 9)
+/// can read this history to generate invoice line items and reports without
+/// re-deriving it from raw subscription state.
+model SubscriptionEvent {
+  id              String       @id @default(cuid())
+  subscriptionId  String
+  subscription    Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  type            String
+  previousPlanId  String?
+  newPlanId       String?
+  prorationAmount Int?
+  createdAt       DateTime     @default(now())
+
+  @@index([subscriptionId])
+  @@map("subscription_events")
 }
