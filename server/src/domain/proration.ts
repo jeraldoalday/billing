@@ -52,3 +52,11 @@ export function calculateProration(input: ProrationInput): ProrationResult {
     remainingFraction,
   };
 }
+
+// The recurring amount a Plan contributes to proration math. Only FLAT plans
+// have a fixed per-period amount; USAGE and TIERED plans bill based on
+// metered consumption at period end (Day 7), which isn't known yet at the
+// moment of a mid-period plan switch, so they contribute nothing here.
+export function periodAmountForProration(plan: { pricingModel: string; flatAmount: number | null }): number {
+  return plan.pricingModel === 'FLAT' ? (plan.flatAmount ?? 0) : 0;
+}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { calculateProration } from './proration';
+import { calculateProration, periodAmountForProration } from './proration';
 
 const periodStart = new Date('2026-01-01T00:00:00.000Z');
 const periodEnd = new Date('2026-02-01T00:00:00.000Z'); // 31-day period
@@ -153,5 +153,23 @@ describe('calculateProration', () => {
     expect(result.creditAmount).toBe(0);
     expect(result.chargeAmount).toBe(2000);
     expect(result.netAmount).toBe(2000);
+  });
+});
+
+describe('periodAmountForProration', () => {
+  it('returns flatAmount for a FLAT plan', () => {
+    expect(periodAmountForProration({ pricingModel: 'FLAT', flatAmount: 2900 })).toBe(2900);
+  });
+
+  it('returns 0 for a USAGE plan regardless of flatAmount', () => {
+    expect(periodAmountForProration({ pricingModel: 'USAGE', flatAmount: null })).toBe(0);
+  });
+
+  it('returns 0 for a TIERED plan regardless of flatAmount', () => {
+    expect(periodAmountForProration({ pricingModel: 'TIERED', flatAmount: null })).toBe(0);
+  });
+
+  it('returns 0 for a FLAT plan with a null flatAmount', () => {
+    expect(periodAmountForProration({ pricingModel: 'FLAT', flatAmount: null })).toBe(0);
   });
 });
