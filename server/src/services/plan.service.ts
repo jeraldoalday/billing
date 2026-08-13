@@ -3,7 +3,7 @@ import { prisma } from '../lib/prisma';
 import * as productService from './product.service';
 import type { CreatePlanInput, ListPlansQuery, UpdatePlanInput } from '../validators/plan';
 
-const TIERS_ORDERED = { tiers: { orderBy: { order: 'asc' as const } } };
+export const TIERS_ORDERED = { tiers: { orderBy: { order: 'asc' as const } } };
 
 export async function createPlan(organizationId: string, input: CreatePlanInput) {
   // Throws a 404 if the product doesn't exist or belongs to another org,
@@ -79,8 +79,17 @@ export async function updatePlan(organizationId: string, planId: string, input: 
   });
 }
 
+// Refuses to delete a plan that any subscription (active or historical)
+// still references. Subscriptions store their pricing by reference to the
+// plan rather than copying it, so deleting a referenced plan would corrupt
+// both live billing and historical records.
 export async function deletePlan(organizationId: string, planId: string): Promise<void> {
   await getPlan(organizationId, planId);
+
+  const subscriptionCount = await prisma.subscription.count({ where: { planId } });
+  if (subscriptionCount > 0) {
+    throw ApiError.conflict('Cannot delete a plan that has subscriptions');
+  }
 
   await prisma.plan.delete({ where: { id: planId } });
 }

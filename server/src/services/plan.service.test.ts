@@ -1,9 +1,14 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { prisma } from '../lib/prisma';
+import { createCustomer } from './customer.service';
 import { createProduct } from './product.service';
+import { createSubscription } from './subscription.service';
 import { createPlan, deletePlan, getPlan, listPlans, updatePlan } from './plan.service';
 
 async function resetDb() {
+  await prisma.subscriptionEvent.deleteMany();
+  await prisma.subscription.deleteMany();
+  await prisma.customer.deleteMany();
   await prisma.plan.deleteMany();
   await prisma.product.deleteMany();
   await prisma.organization.deleteMany();
@@ -262,5 +267,23 @@ describe('deletePlan', () => {
 
     await expect(deletePlan(orgA.id, plan.id)).rejects.toMatchObject({ status: 404 });
     await expect(getPlan(orgB.id, plan.id)).resolves.toMatchObject({ id: plan.id });
+  });
+
+  it('refuses to delete a plan that a subscription references', async () => {
+    const org = await makeOrg('Acme');
+    const product = await createProduct(org.id, { name: 'API Access' });
+    const plan = await createPlan(org.id, {
+      productId: product.id,
+      name: 'Pro Monthly',
+      pricingModel: 'FLAT',
+      interval: 'MONTH',
+      currency: 'usd',
+      flatAmount: 2900,
+    });
+    const customer = await createCustomer(org.id, { name: 'Jane Doe', email: 'jane@example.com' });
+    await createSubscription(org.id, { customerId: customer.id, planId: plan.id });
+
+    await expect(deletePlan(org.id, plan.id)).rejects.toMatchObject({ status: 409 });
+    await expect(getPlan(org.id, plan.id)).resolves.toMatchObject({ id: plan.id });
   });
 });
