@@ -8,6 +8,7 @@ import { customersRouter } from './routes/customers';
 import { healthRouter } from './routes/health';
 import { plansRouter } from './routes/plans';
 import { productsRouter } from './routes/products';
+import { subscriptionsRouter } from './routes/subscriptions';
 
 export function createApp(): Express {
   const app = express();
@@ -22,6 +23,7 @@ export function createApp(): Express {
   app.use('/products', productsRouter);
   app.use('/plans', plansRouter);
   app.use('/customers', customersRouter);
+  app.use('/subscriptions', subscriptionsRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);
