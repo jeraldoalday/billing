@@ -25,7 +25,9 @@ async function resetDb() {
 }
 
 async function makeOrg(name: string) {
-  return prisma.organization.create({ data: { name, slug: name.toLowerCase().replace(/\s+/g, '-') } });
+  return prisma.organization.create({
+    data: { name, slug: name.toLowerCase().replace(/\s+/g, '-') },
+  });
 }
 
 async function makeFlatPlan(organizationId: string, name: string, flatAmount: number) {
@@ -64,7 +66,10 @@ describe('generateInvoice', () => {
     const org = await makeOrg('Acme');
     const customer = await createCustomer(org.id, { name: 'Jane Doe', email: 'jane@example.com' });
     const plan = await makeFlatPlan(org.id, 'Pro Monthly', 2900);
-    const subscription = await createSubscription(org.id, { customerId: customer.id, planId: plan.id });
+    const subscription = await createSubscription(org.id, {
+      customerId: customer.id,
+      planId: plan.id,
+    });
 
     const invoice = await generateInvoice(org.id, { subscriptionId: subscription.id });
 
@@ -80,9 +85,16 @@ describe('generateInvoice', () => {
 
   it('applies tax based on the customer country', async () => {
     const org = await makeOrg('Acme');
-    const customer = await createCustomer(org.id, { name: 'Jane Doe', email: 'jane@example.com', country: 'GB' });
+    const customer = await createCustomer(org.id, {
+      name: 'Jane Doe',
+      email: 'jane@example.com',
+      country: 'GB',
+    });
     const plan = await makeFlatPlan(org.id, 'Pro Monthly', 10000);
-    const subscription = await createSubscription(org.id, { customerId: customer.id, planId: plan.id });
+    const subscription = await createSubscription(org.id, {
+      customerId: customer.id,
+      planId: plan.id,
+    });
 
     const invoice = await generateInvoice(org.id, { subscriptionId: subscription.id });
 
@@ -127,7 +139,27 @@ describe('generateInvoice', () => {
     const org = await makeOrg('Acme');
     const customer = await createCustomer(org.id, { name: 'Jane Doe', email: 'jane@example.com' });
     const plan = await makeUsagePlan(org.id, 'Metered API');
-    const subscription = await createSubscription(org.id, { customerId: customer.id, planId: plan.id });
+    const subscription = await createSubscription(org.id, {
+      customerId: customer.id,
+      planId: plan.id,
+    });
+
+    const invoice = await generateInvoice(org.id, { subscriptionId: subscription.id });
+
+    expect(invoice.lineItems).toHaveLength(0);
+    expect(invoice.subtotal).toBe(0);
+    expect(invoice.total).toBe(0);
+  });
+
+  it('charges no PLAN line item for a trialing subscription', async () => {
+    const org = await makeOrg('Acme');
+    const customer = await createCustomer(org.id, { name: 'Jane Doe', email: 'jane@example.com' });
+    const plan = await makeFlatPlan(org.id, 'Pro Monthly', 2900);
+    const subscription = await createSubscription(org.id, {
+      customerId: customer.id,
+      planId: plan.id,
+      trialDays: 14,
+    });
 
     const invoice = await generateInvoice(org.id, { subscriptionId: subscription.id });
 
@@ -141,8 +173,13 @@ describe('generateInvoice', () => {
     const customer = await createCustomer(org.id, { name: 'Jane Doe', email: 'jane@example.com' });
     const basicPlan = await makeFlatPlan(org.id, 'Basic', 1000);
     const proPlan = await makeFlatPlan(org.id, 'Pro', 5000);
-    const subscription = await createSubscription(org.id, { customerId: customer.id, planId: basicPlan.id });
-    const { proration } = await changeSubscriptionPlan(org.id, subscription.id, { planId: proPlan.id });
+    const subscription = await createSubscription(org.id, {
+      customerId: customer.id,
+      planId: basicPlan.id,
+    });
+    const { proration } = await changeSubscriptionPlan(org.id, subscription.id, {
+      planId: proPlan.id,
+    });
 
     const invoice = await generateInvoice(org.id, { subscriptionId: subscription.id });
 
@@ -156,7 +193,10 @@ describe('generateInvoice', () => {
     const customer = await createCustomer(org.id, { name: 'Jane Doe', email: 'jane@example.com' });
     const basicPlan = await makeFlatPlan(org.id, 'Basic', 1000);
     const proPlan = await makeFlatPlan(org.id, 'Pro', 5000);
-    const subscription = await createSubscription(org.id, { customerId: customer.id, planId: basicPlan.id });
+    const subscription = await createSubscription(org.id, {
+      customerId: customer.id,
+      planId: basicPlan.id,
+    });
     await changeSubscriptionPlan(org.id, subscription.id, { planId: proPlan.id });
     const first = await generateInvoice(org.id, { subscriptionId: subscription.id });
     await voidInvoice(org.id, first.id);
@@ -170,10 +210,15 @@ describe('generateInvoice', () => {
     const org = await makeOrg('Acme');
     const customer = await createCustomer(org.id, { name: 'Jane Doe', email: 'jane@example.com' });
     const plan = await makeFlatPlan(org.id, 'Pro Monthly', 2900);
-    const subscription = await createSubscription(org.id, { customerId: customer.id, planId: plan.id });
+    const subscription = await createSubscription(org.id, {
+      customerId: customer.id,
+      planId: plan.id,
+    });
     await generateInvoice(org.id, { subscriptionId: subscription.id });
 
-    await expect(generateInvoice(org.id, { subscriptionId: subscription.id })).rejects.toMatchObject({
+    await expect(
+      generateInvoice(org.id, { subscriptionId: subscription.id }),
+    ).rejects.toMatchObject({
       status: 409,
     });
   });
@@ -182,7 +227,10 @@ describe('generateInvoice', () => {
     const org = await makeOrg('Acme');
     const customer = await createCustomer(org.id, { name: 'Jane Doe', email: 'jane@example.com' });
     const plan = await makeFlatPlan(org.id, 'Pro Monthly', 2900);
-    const subscription = await createSubscription(org.id, { customerId: customer.id, planId: plan.id });
+    const subscription = await createSubscription(org.id, {
+      customerId: customer.id,
+      planId: plan.id,
+    });
     const first = await generateInvoice(org.id, { subscriptionId: subscription.id });
     await voidInvoice(org.id, first.id);
 
@@ -196,10 +244,18 @@ describe('generateInvoice', () => {
     const org = await makeOrg('Acme');
     const customer = await createCustomer(org.id, { name: 'Jane Doe', email: 'jane@example.com' });
     const plan = await makeFlatPlan(org.id, 'Pro Monthly', 2900);
-    const subscription = await createSubscription(org.id, { customerId: customer.id, planId: plan.id });
-    await prisma.subscription.update({ where: { id: subscription.id }, data: { status: 'CANCELED' } });
+    const subscription = await createSubscription(org.id, {
+      customerId: customer.id,
+      planId: plan.id,
+    });
+    await prisma.subscription.update({
+      where: { id: subscription.id },
+      data: { status: 'CANCELED' },
+    });
 
-    await expect(generateInvoice(org.id, { subscriptionId: subscription.id })).rejects.toMatchObject({
+    await expect(
+      generateInvoice(org.id, { subscriptionId: subscription.id }),
+    ).rejects.toMatchObject({
       status: 400,
     });
   });
@@ -209,9 +265,14 @@ describe('generateInvoice', () => {
     const orgB = await makeOrg('Org B');
     const customerB = await createCustomer(orgB.id, { name: 'B Customer', email: 'b@example.com' });
     const planB = await makeFlatPlan(orgB.id, 'Pro Monthly', 2900);
-    const subscriptionB = await createSubscription(orgB.id, { customerId: customerB.id, planId: planB.id });
+    const subscriptionB = await createSubscription(orgB.id, {
+      customerId: customerB.id,
+      planId: planB.id,
+    });
 
-    await expect(generateInvoice(orgA.id, { subscriptionId: subscriptionB.id })).rejects.toMatchObject({
+    await expect(
+      generateInvoice(orgA.id, { subscriptionId: subscriptionB.id }),
+    ).rejects.toMatchObject({
       status: 404,
     });
   });
@@ -258,7 +319,10 @@ describe('invoice status transitions', () => {
     const org = await makeOrg('Acme');
     const customer = await createCustomer(org.id, { name: 'Jane Doe', email: 'jane@example.com' });
     const plan = await makeFlatPlan(org.id, 'Pro Monthly', 2900);
-    const subscription = await createSubscription(org.id, { customerId: customer.id, planId: plan.id });
+    const subscription = await createSubscription(org.id, {
+      customerId: customer.id,
+      planId: plan.id,
+    });
     const invoice = await generateInvoice(org.id, { subscriptionId: subscription.id });
     return { org, invoice };
   }
@@ -319,7 +383,10 @@ describe('getInvoice', () => {
     const orgB = await makeOrg('Org B');
     const customerB = await createCustomer(orgB.id, { name: 'B Customer', email: 'b@example.com' });
     const planB = await makeFlatPlan(orgB.id, 'Pro Monthly', 2900);
-    const subscriptionB = await createSubscription(orgB.id, { customerId: customerB.id, planId: planB.id });
+    const subscriptionB = await createSubscription(orgB.id, {
+      customerId: customerB.id,
+      planId: planB.id,
+    });
     const invoice = await generateInvoice(orgB.id, { subscriptionId: subscriptionB.id });
 
     await expect(getInvoice(orgA.id, invoice.id)).rejects.toMatchObject({ status: 404 });

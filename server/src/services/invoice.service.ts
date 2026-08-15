@@ -105,7 +105,11 @@ export async function generateInvoice(organizationId: string, input: GenerateInv
   }
 
   const lineItems: DraftLineItem[] = [];
-  const plan = planLineItem(subscription.plan);
+  // A trialing subscription hasn't started paying yet, so its period
+  // generates no PLAN charge (an invoice with only proration/usage line
+  // items, or none at all, is still valid to draft — e.g. a plan change
+  // made mid-trial for when the trial ends).
+  const plan = subscription.status === 'TRIALING' ? null : planLineItem(subscription.plan);
   if (plan) {
     lineItems.push(plan);
   }
