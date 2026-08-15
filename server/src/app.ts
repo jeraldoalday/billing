@@ -6,6 +6,7 @@ import { errorHandler, notFoundHandler } from './middleware/errorHandler';
 import { authRouter } from './routes/auth';
 import { customersRouter } from './routes/customers';
 import { healthRouter } from './routes/health';
+import { invoicesRouter } from './routes/invoices';
 import { plansRouter } from './routes/plans';
 import { productsRouter } from './routes/products';
 import { subscriptionsRouter } from './routes/subscriptions';
@@ -24,6 +25,7 @@ export function createApp(): Express {
   app.use('/plans', plansRouter);
   app.use('/customers', customersRouter);
   app.use('/subscriptions', subscriptionsRouter);
+  app.use('/invoices', invoicesRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);
