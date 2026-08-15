@@ -20,6 +20,7 @@ export async function createCustomer(organizationId: string, input: CreateCustom
       name: input.name,
       email: input.email,
       active: input.active ?? true,
+      country: input.country,
     },
   });
 }
@@ -63,6 +64,7 @@ export async function updateCustomer(organizationId: string, customerId: string,
       name: input.name,
       email: input.email,
       active: input.active,
+      country: input.country,
     },
   });
 }

@@ -28,6 +28,15 @@ describe('createCustomer', () => {
     expect(customer.name).toBe('Jane Doe');
     expect(customer.email).toBe('jane@example.com');
     expect(customer.active).toBe(true);
+    expect(customer.country).toBeNull();
+  });
+
+  it('stores a tax jurisdiction country when given', async () => {
+    const org = await makeOrg('Acme');
+
+    const customer = await createCustomer(org.id, { name: 'Jane Doe', email: 'jane@example.com', country: 'GB' });
+
+    expect(customer.country).toBe('GB');
   });
 
   it('throws a 409 when the email is already used within the organization', async () => {
