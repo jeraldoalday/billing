@@ -258,4 +258,20 @@ describe('invoice status transitions', () => {
 
     expect(res.status).toBe(409);
   });
+
+  it('returns 404 when finalizing, paying, or voiding an invoice belonging to another organization', async () => {
+    const tokenA = await signupAndGetToken('a@acme.test');
+    const tokenB = await signupAndGetToken('b@other.test');
+    const invoiceId = await createDraftInvoice(tokenB);
+
+    const finalizeRes = await request(app)
+      .post(`/invoices/${invoiceId}/finalize`)
+      .set('Authorization', `Bearer ${tokenA}`);
+    const payRes = await request(app).post(`/invoices/${invoiceId}/pay`).set('Authorization', `Bearer ${tokenA}`);
+    const voidRes = await request(app).post(`/invoices/${invoiceId}/void`).set('Authorization', `Bearer ${tokenA}`);
+
+    expect(finalizeRes.status).toBe(404);
+    expect(payRes.status).toBe(404);
+    expect(voidRes.status).toBe(404);
+  });
 });

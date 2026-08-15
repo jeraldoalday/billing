@@ -312,6 +312,38 @@ describe('listInvoices', () => {
     expect(open).toHaveLength(1);
     expect(open[0]?.id).toBe(invoiceA.id);
   });
+
+  it('filters by customerId', async () => {
+    const org = await makeOrg('Acme');
+    const customerA = await createCustomer(org.id, { name: 'A Customer', email: 'a@example.com' });
+    const customerB = await createCustomer(org.id, { name: 'B Customer', email: 'b@example.com' });
+    const plan = await makeFlatPlan(org.id, 'Pro Monthly', 1000);
+    const subA = await createSubscription(org.id, { customerId: customerA.id, planId: plan.id });
+    const subB = await createSubscription(org.id, { customerId: customerB.id, planId: plan.id });
+    const invoiceA = await generateInvoice(org.id, { subscriptionId: subA.id });
+    await generateInvoice(org.id, { subscriptionId: subB.id });
+
+    const forCustomerA = await listInvoices(org.id, { customerId: customerA.id });
+
+    expect(forCustomerA).toHaveLength(1);
+    expect(forCustomerA[0]?.id).toBe(invoiceA.id);
+  });
+
+  it('filters by subscriptionId', async () => {
+    const org = await makeOrg('Acme');
+    const customer = await createCustomer(org.id, { name: 'Jane Doe', email: 'jane@example.com' });
+    const planA = await makeFlatPlan(org.id, 'Plan A', 1000);
+    const planB = await makeFlatPlan(org.id, 'Plan B', 2000);
+    const subA = await createSubscription(org.id, { customerId: customer.id, planId: planA.id });
+    const subB = await createSubscription(org.id, { customerId: customer.id, planId: planB.id });
+    const invoiceB = await generateInvoice(org.id, { subscriptionId: subB.id });
+    await generateInvoice(org.id, { subscriptionId: subA.id });
+
+    const forSubB = await listInvoices(org.id, { subscriptionId: subB.id });
+
+    expect(forSubB).toHaveLength(1);
+    expect(forSubB[0]?.id).toBe(invoiceB.id);
+  });
 });
 
 describe('invoice status transitions', () => {
