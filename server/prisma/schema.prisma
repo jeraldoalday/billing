@@ -16,11 +16,18 @@ model Organization {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  // Counter behind each Invoice's sequential per-org `number` (see
+  // src/services/invoice.service.ts). Incremented inside the same
+  // transaction that creates the invoice so numbers are gapless and never
+  // reused, even under concurrent invoice generation.
+  invoiceSequence Int @default(0)
+
   users         User[]
   products      Product[]
   plans         Plan[]
   customers     Customer[]
   subscriptions Subscription[]
+  invoices      Invoice[]
 
   @@map("organizations")
 }
@@ -117,10 +124,15 @@ model Customer {
   name           String
   email          String
   active         Boolean      @default(true)
+  // ISO 3166-1 alpha-2 tax jurisdiction, e.g. "US"/"GB"/"DE". Optional since
+  // it wasn't required before Day 5; a customer with no country on file is
+  // simply taxed at 0 (see src/domain/tax.ts).
+  country        String?
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
 
   subscriptions Subscription[]
+  invoices      Invoice[]
 
   @@unique([organizationId, email])
   @@index([organizationId])
@@ -154,7 +166,8 @@ model Subscription {
   createdAt          DateTime     @default(now())
   updatedAt          DateTime     @updatedAt
 
-  events SubscriptionEvent[]
+  events   SubscriptionEvent[]
+  invoices Invoice[]
 
   @@index([organizationId])
   @@index([customerId])
@@ -178,6 +191,76 @@ model SubscriptionEvent {
   prorationAmount Int?
   createdAt       DateTime     @default(now())
 
+  // Set once Day 5's invoicing engine turns this PLAN_CHANGED event's
+  // prorationAmount into an InvoiceLineItem, so the same proration is never
+  // billed twice across multiple invoice generations for the subscription.
+  invoiceLineItem InvoiceLineItem?
+
   @@index([subscriptionId])
   @@map("subscription_events")
+}
+
+/// A generated bill for one Subscription billing period. `number` is a
+/// sequential, per-Organization identifier (see Organization.invoiceSequence
+/// and src/services/invoice.service.ts), not the database id. `status`
+/// (InvoiceStatus: DRAFT/OPEN/PAID/VOID) follows the state machine in
+/// src/domain/invoice.ts; SQLite has no native enum type, so it's a plain
+/// string constrained by Zod like the other status fields in this schema.
+/// `subtotal`/`taxAmount`/`total` are integer minor currency units, cached
+/// on the invoice (not recomputed from line items on every read) so a paid
+/// or voided invoice's amounts stay fixed even if later code changes how
+/// totals are derived.
+model Invoice {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  customerId     String
+  customer       Customer     @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  subscriptionId String
+  subscription   Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  number         String
+  status         String
+  currency       String
+  periodStart    DateTime
+  periodEnd      DateTime
+  subtotal       Int
+  taxAmount      Int
+  total          Int
+  issuedAt       DateTime?
+  paidAt         DateTime?
+  voidedAt       DateTime?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  lineItems InvoiceLineItem[]
+
+  @@unique([organizationId, number])
+  @@index([organizationId])
+  @@index([customerId])
+  @@index([subscriptionId])
+  @@map("invoices")
+}
+
+/// One charge or credit on an Invoice. `type` (InvoiceLineItemType:
+/// PLAN/PRORATION) records where the amount came from: PLAN is the plan's
+/// recurring price for the period, PRORATION is a signed credit/charge
+/// carried over from a mid-period plan change (`subscriptionEventId` links
+/// back to the originating SubscriptionEvent so it's only ever invoiced
+/// once). `amount` is signed (minor currency units) — negative for a
+/// proration credit.
+model InvoiceLineItem {
+  id                  String            @id @default(cuid())
+  invoiceId           String
+  invoice             Invoice           @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  type                String
+  description         String
+  quantity            Int               @default(1)
+  unitAmount          Int
+  amount              Int
+  subscriptionEventId String?           @unique
+  subscriptionEvent   SubscriptionEvent? @relation(fields: [subscriptionEventId], references: [id])
+  createdAt           DateTime          @default(now())
+
+  @@index([invoiceId])
+  @@map("invoice_line_items")
 }
