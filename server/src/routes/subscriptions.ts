@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { requireAuth } from '../middleware/auth';
 import { ApiError } from '../middleware/errorHandler';
 import * as subscriptionService from '../services/subscription.service';
+import * as usageService from '../services/usage.service';
 import {
   cancelSubscriptionSchema,
   changeSubscriptionPlanSchema,
@@ -53,7 +54,11 @@ subscriptionsRouter.post('/:id/cancel', async (req, res, next) => {
     if (!req.auth) throw ApiError.unauthorized();
 
     const input = cancelSubscriptionSchema.parse(req.body);
-    const subscription = await subscriptionService.cancelSubscription(req.auth.orgId, req.params.id, input);
+    const subscription = await subscriptionService.cancelSubscription(
+      req.auth.orgId,
+      req.params.id,
+      input,
+    );
     res.json({ subscription });
   } catch (err) {
     next(err);
@@ -65,7 +70,11 @@ subscriptionsRouter.patch('/:id/plan', async (req, res, next) => {
     if (!req.auth) throw ApiError.unauthorized();
 
     const input = changeSubscriptionPlanSchema.parse(req.body);
-    const result = await subscriptionService.changeSubscriptionPlan(req.auth.orgId, req.params.id, input);
+    const result = await subscriptionService.changeSubscriptionPlan(
+      req.auth.orgId,
+      req.params.id,
+      input,
+    );
     res.json(result);
   } catch (err) {
     next(err);
@@ -78,6 +87,17 @@ subscriptionsRouter.post('/:id/trial/end', async (req, res, next) => {
 
     const subscription = await subscriptionService.endTrial(req.auth.orgId, req.params.id);
     res.json({ subscription });
+  } catch (err) {
+    next(err);
+  }
+});
+
+subscriptionsRouter.get('/:id/usage', async (req, res, next) => {
+  try {
+    if (!req.auth) throw ApiError.unauthorized();
+
+    const summary = await usageService.getCurrentPeriodUsageSummary(req.auth.orgId, req.params.id);
+    res.json(summary);
   } catch (err) {
     next(err);
   }
