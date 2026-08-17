@@ -7,6 +7,7 @@ import { authRouter } from './routes/auth';
 import { customersRouter } from './routes/customers';
 import { healthRouter } from './routes/health';
 import { invoicesRouter } from './routes/invoices';
+import { paymentMethodsRouter } from './routes/paymentMethods';
 import { plansRouter } from './routes/plans';
 import { productsRouter } from './routes/products';
 import { subscriptionsRouter } from './routes/subscriptions';
@@ -26,6 +27,7 @@ export function createApp(): Express {
   app.use('/customers', customersRouter);
   app.use('/subscriptions', subscriptionsRouter);
   app.use('/invoices', invoicesRouter);
+  app.use('/payment-methods', paymentMethodsRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);
