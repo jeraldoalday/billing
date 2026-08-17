@@ -11,6 +11,7 @@ import { paymentMethodsRouter } from './routes/paymentMethods';
 import { plansRouter } from './routes/plans';
 import { productsRouter } from './routes/products';
 import { subscriptionsRouter } from './routes/subscriptions';
+import { usageEventsRouter } from './routes/usageEvents';
 
 export function createApp(): Express {
   const app = express();
@@ -28,6 +29,7 @@ export function createApp(): Express {
   app.use('/subscriptions', subscriptionsRouter);
   app.use('/invoices', invoicesRouter);
   app.use('/payment-methods', paymentMethodsRouter);
+  app.use('/usage-events', usageEventsRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);
