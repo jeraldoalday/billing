@@ -6,6 +6,8 @@ import { prisma } from '../lib/prisma';
 const app = createApp();
 
 async function resetDb() {
+  await prisma.payment.deleteMany();
+  await prisma.paymentMethod.deleteMany();
   await prisma.invoiceLineItem.deleteMany();
   await prisma.invoice.deleteMany();
   await prisma.subscriptionEvent.deleteMany();
@@ -56,6 +58,26 @@ async function createSubscriptionAs(token: string, customerId: string, planId: s
     .set('Authorization', `Bearer ${token}`)
     .send({ customerId, planId });
   return res.body.subscription.id as string;
+}
+
+async function addPaymentMethodAs(token: string, customerId: string, cardNumber: string) {
+  const res = await request(app)
+    .post('/payment-methods')
+    .set('Authorization', `Bearer ${token}`)
+    .send({ customerId, cardNumber, expMonth: 12, expYear: 2030 });
+  return res.body.paymentMethod.id as string;
+}
+
+async function createOpenInvoiceAs(token: string, customerId: string, planId: string) {
+  const subscriptionId = await createSubscriptionAs(token, customerId, planId);
+  const invoiceRes = await request(app)
+    .post('/invoices')
+    .set('Authorization', `Bearer ${token}`)
+    .send({ subscriptionId });
+  await request(app)
+    .post(`/invoices/${invoiceRes.body.invoice.id}/finalize`)
+    .set('Authorization', `Bearer ${token}`);
+  return invoiceRes.body.invoice.id as string;
 }
 
 beforeEach(resetDb);
@@ -273,5 +295,101 @@ describe('invoice status transitions', () => {
     expect(finalizeRes.status).toBe(404);
     expect(payRes.status).toBe(404);
     expect(voidRes.status).toBe(404);
+  });
+});
+
+describe('POST /invoices/:id/charge', () => {
+  it('charges an OPEN invoice and marks it PAID on success', async () => {
+    const token = await signupAndGetToken();
+    const customerId = await createCustomerAs(token);
+    const planId = await createFlatPlanAs(token, 'Pro Monthly', 2900);
+    const invoiceId = await createOpenInvoiceAs(token, customerId, planId);
+    const paymentMethodId = await addPaymentMethodAs(token, customerId, '4242424242424242');
+
+    const res = await request(app)
+      .post(`/invoices/${invoiceId}/charge`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ paymentMethodId });
+
+    expect(res.status).toBe(201);
+    expect(res.body.payment.status).toBe('SUCCEEDED');
+
+    const invoiceRes = await request(app).get(`/invoices/${invoiceId}`).set('Authorization', `Bearer ${token}`);
+    expect(invoiceRes.body.invoice.status).toBe('PAID');
+  });
+
+  it('records a FAILED payment and leaves the invoice OPEN on a decline', async () => {
+    const token = await signupAndGetToken();
+    const customerId = await createCustomerAs(token);
+    const planId = await createFlatPlanAs(token, 'Pro Monthly', 2900);
+    const invoiceId = await createOpenInvoiceAs(token, customerId, planId);
+    const paymentMethodId = await addPaymentMethodAs(token, customerId, '4000000000000002');
+
+    const res = await request(app)
+      .post(`/invoices/${invoiceId}/charge`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ paymentMethodId });
+
+    expect(res.status).toBe(201);
+    expect(res.body.payment.status).toBe('FAILED');
+    expect(res.body.payment.failureCode).toBe('card_declined');
+
+    const invoiceRes = await request(app).get(`/invoices/${invoiceId}`).set('Authorization', `Bearer ${token}`);
+    expect(invoiceRes.body.invoice.status).toBe('OPEN');
+  });
+
+  it('returns 409 when the invoice is not OPEN', async () => {
+    const token = await signupAndGetToken();
+    const customerId = await createCustomerAs(token);
+    const planId = await createFlatPlanAs(token, 'Pro Monthly', 2900);
+    const subscriptionId = await createSubscriptionAs(token, customerId, planId);
+    const draftInvoice = await request(app)
+      .post('/invoices')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ subscriptionId });
+    const paymentMethodId = await addPaymentMethodAs(token, customerId, '4242424242424242');
+
+    const res = await request(app)
+      .post(`/invoices/${draftInvoice.body.invoice.id}/charge`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ paymentMethodId });
+
+    expect(res.status).toBe(409);
+  });
+
+  it('returns 404 when charging an invoice belonging to another organization', async () => {
+    const tokenA = await signupAndGetToken('a@acme.test');
+    const tokenB = await signupAndGetToken('b@other.test');
+    const customerIdB = await createCustomerAs(tokenB, 'b-cust@example.com');
+    const planIdB = await createFlatPlanAs(tokenB, 'Pro Monthly', 2900);
+    const invoiceIdB = await createOpenInvoiceAs(tokenB, customerIdB, planIdB);
+    const paymentMethodIdB = await addPaymentMethodAs(tokenB, customerIdB, '4242424242424242');
+
+    const res = await request(app)
+      .post(`/invoices/${invoiceIdB}/charge`)
+      .set('Authorization', `Bearer ${tokenA}`)
+      .send({ paymentMethodId: paymentMethodIdB });
+
+    expect(res.status).toBe(404);
+  });
+});
+
+describe('GET /invoices/:id/payments', () => {
+  it('lists payment attempts recorded for an invoice', async () => {
+    const token = await signupAndGetToken();
+    const customerId = await createCustomerAs(token);
+    const planId = await createFlatPlanAs(token, 'Pro Monthly', 2900);
+    const invoiceId = await createOpenInvoiceAs(token, customerId, planId);
+    const paymentMethodId = await addPaymentMethodAs(token, customerId, '4000000000000002');
+    await request(app)
+      .post(`/invoices/${invoiceId}/charge`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ paymentMethodId });
+
+    const res = await request(app).get(`/invoices/${invoiceId}/payments`).set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.payments).toHaveLength(1);
+    expect(res.body.payments[0].status).toBe('FAILED');
   });
 });
