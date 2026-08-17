@@ -4,6 +4,7 @@ import { createCustomer } from './customer.service';
 import { createPlan } from './plan.service';
 import { createProduct } from './product.service';
 import { changeSubscriptionPlan, createSubscription } from './subscription.service';
+import { recordUsageEvent } from './usage.service';
 import {
   finalizeInvoice,
   generateInvoice,
@@ -14,6 +15,7 @@ import {
 } from './invoice.service';
 
 async function resetDb() {
+  await prisma.usageEvent.deleteMany();
   await prisma.invoiceLineItem.deleteMany();
   await prisma.invoice.deleteMany();
   await prisma.subscriptionEvent.deleteMany();
@@ -52,6 +54,22 @@ async function makeUsagePlan(organizationId: string, name: string) {
     currency: 'usd',
     usageMetric: 'api_calls',
     usageUnitAmount: 2,
+  });
+}
+
+async function makeTieredPlan(organizationId: string, name: string) {
+  const product = await createProduct(organizationId, { name: `${name} product` });
+  return createPlan(organizationId, {
+    productId: product.id,
+    name,
+    pricingModel: 'TIERED',
+    interval: 'MONTH',
+    currency: 'usd',
+    usageMetric: 'api_calls',
+    tiers: [
+      { upTo: 100, unitAmount: 10, flatFee: 0 },
+      { upTo: null, unitAmount: 5, flatFee: 0 },
+    ],
   });
 }
 
@@ -275,6 +293,177 @@ describe('generateInvoice', () => {
     ).rejects.toMatchObject({
       status: 404,
     });
+  });
+});
+
+describe('generateInvoice usage billing', () => {
+  it('includes a USAGE line item priced from aggregated usage for a USAGE plan', async () => {
+    const org = await makeOrg('Acme');
+    const customer = await createCustomer(org.id, { name: 'Jane Doe', email: 'jane@example.com' });
+    const plan = await makeUsagePlan(org.id, 'Metered API');
+    const subscription = await createSubscription(org.id, {
+      customerId: customer.id,
+      planId: plan.id,
+    });
+    await recordUsageEvent(org.id, {
+      subscriptionId: subscription.id,
+      metric: 'api_calls',
+      quantity: 100,
+    });
+    await recordUsageEvent(org.id, {
+      subscriptionId: subscription.id,
+      metric: 'api_calls',
+      quantity: 50,
+    });
+
+    const invoice = await generateInvoice(org.id, { subscriptionId: subscription.id });
+
+    expect(invoice.lineItems).toHaveLength(1);
+    const usageLine = invoice.lineItems[0];
+    expect(usageLine?.type).toBe('USAGE');
+    expect(usageLine?.quantity).toBe(150);
+    expect(usageLine?.amount).toBe(150 * 2);
+    expect(invoice.subtotal).toBe(300);
+  });
+
+  it('includes a USAGE line item priced from graduated tiers for a TIERED plan', async () => {
+    const org = await makeOrg('Acme');
+    const customer = await createCustomer(org.id, { name: 'Jane Doe', email: 'jane@example.com' });
+    const plan = await makeTieredPlan(org.id, 'Tiered API');
+    const subscription = await createSubscription(org.id, {
+      customerId: customer.id,
+      planId: plan.id,
+    });
+    await recordUsageEvent(org.id, {
+      subscriptionId: subscription.id,
+      metric: 'api_calls',
+      quantity: 150,
+    });
+
+    const invoice = await generateInvoice(org.id, { subscriptionId: subscription.id });
+
+    // 100 units @ 10 + 50 units @ 5
+    expect(invoice.subtotal).toBe(100 * 10 + 50 * 5);
+    expect(invoice.lineItems[0]?.type).toBe('USAGE');
+    expect(invoice.lineItems[0]?.quantity).toBe(150);
+  });
+
+  it('produces no USAGE line item when no usage was recorded', async () => {
+    const org = await makeOrg('Acme');
+    const customer = await createCustomer(org.id, { name: 'Jane Doe', email: 'jane@example.com' });
+    const plan = await makeUsagePlan(org.id, 'Metered API');
+    const subscription = await createSubscription(org.id, {
+      customerId: customer.id,
+      planId: plan.id,
+    });
+
+    const invoice = await generateInvoice(org.id, { subscriptionId: subscription.id });
+
+    expect(invoice.lineItems).toHaveLength(0);
+    expect(invoice.subtotal).toBe(0);
+  });
+
+  it('only aggregates usage matching the plan usage metric', async () => {
+    const org = await makeOrg('Acme');
+    const customer = await createCustomer(org.id, { name: 'Jane Doe', email: 'jane@example.com' });
+    const plan = await makeUsagePlan(org.id, 'Metered API');
+    const subscription = await createSubscription(org.id, {
+      customerId: customer.id,
+      planId: plan.id,
+    });
+    await recordUsageEvent(org.id, {
+      subscriptionId: subscription.id,
+      metric: 'api_calls',
+      quantity: 10,
+    });
+    await recordUsageEvent(org.id, {
+      subscriptionId: subscription.id,
+      metric: 'unrelated_metric',
+      quantity: 1000,
+    });
+
+    const invoice = await generateInvoice(org.id, { subscriptionId: subscription.id });
+
+    expect(invoice.lineItems[0]?.quantity).toBe(10);
+    expect(invoice.subtotal).toBe(20);
+  });
+
+  it('excludes usage recorded outside the current billing period', async () => {
+    const org = await makeOrg('Acme');
+    const customer = await createCustomer(org.id, { name: 'Jane Doe', email: 'jane@example.com' });
+    const plan = await makeUsagePlan(org.id, 'Metered API');
+    const subscription = await createSubscription(org.id, {
+      customerId: customer.id,
+      planId: plan.id,
+    });
+    const beforePeriod = new Date(subscription.currentPeriodStart.getTime() - 1000);
+    await recordUsageEvent(org.id, {
+      subscriptionId: subscription.id,
+      metric: 'api_calls',
+      quantity: 500,
+      timestamp: beforePeriod,
+    });
+    await recordUsageEvent(org.id, {
+      subscriptionId: subscription.id,
+      metric: 'api_calls',
+      quantity: 10,
+      timestamp: subscription.currentPeriodEnd,
+    });
+
+    const invoice = await generateInvoice(org.id, { subscriptionId: subscription.id });
+
+    expect(invoice.lineItems).toHaveLength(0);
+  });
+
+  it('produces no USAGE line item for a trialing subscription even with usage recorded', async () => {
+    const org = await makeOrg('Acme');
+    const customer = await createCustomer(org.id, { name: 'Jane Doe', email: 'jane@example.com' });
+    const plan = await makeUsagePlan(org.id, 'Metered API');
+    const subscription = await createSubscription(org.id, {
+      customerId: customer.id,
+      planId: plan.id,
+      trialDays: 14,
+    });
+    await recordUsageEvent(org.id, {
+      subscriptionId: subscription.id,
+      metric: 'api_calls',
+      quantity: 100,
+    });
+
+    const invoice = await generateInvoice(org.id, { subscriptionId: subscription.id });
+
+    expect(invoice.lineItems).toHaveLength(0);
+    expect(invoice.total).toBe(0);
+  });
+
+  it('prices a single-tier TIERED plan as a flat per-unit rate', async () => {
+    const org = await makeOrg('Acme');
+    const customer = await createCustomer(org.id, { name: 'Jane Doe', email: 'jane@example.com' });
+    const product = await createProduct(org.id, { name: 'Single-tier product' });
+    const plan = await createPlan(org.id, {
+      productId: product.id,
+      name: 'Per-call',
+      pricingModel: 'TIERED',
+      interval: 'MONTH',
+      currency: 'usd',
+      usageMetric: 'api_calls',
+      tiers: [{ upTo: null, unitAmount: 1, flatFee: 0 }],
+    });
+    const subscription = await createSubscription(org.id, {
+      customerId: customer.id,
+      planId: plan.id,
+    });
+    await recordUsageEvent(org.id, {
+      subscriptionId: subscription.id,
+      metric: 'api_calls',
+      quantity: 250,
+    });
+
+    const invoice = await generateInvoice(org.id, { subscriptionId: subscription.id });
+
+    expect(invoice.lineItems).toHaveLength(1);
+    expect(invoice.lineItems[0]?.type).toBe('USAGE');
+    expect(invoice.lineItems[0]?.amount).toBe(250);
   });
 });
 
