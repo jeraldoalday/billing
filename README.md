@@ -54,7 +54,7 @@ next — including for the automated daily build (see `AGENT.md`).
 - [x] Day 3: Products, plans, and pricing models (flat/tiered/usage-based)
 - [x] Day 4: Customers and subscription lifecycle (create/upgrade/downgrade/cancel/trial, proration)
 - [x] Day 5: Invoicing engine (line items, tax, numbering, status state machine)
-- [ ] Day 6: Payments via a mock gateway abstraction, retries
+- [x] Day 6: Payments via a mock gateway abstraction, retries
 - [ ] Day 7: Usage-based billing / metering
 - [ ] Day 8: Dunning (failed-payment retry) and outbound webhooks
 - [ ] Day 9: Coupons/discounts, refined tax rules, MRR/churn/ARPU reporting
