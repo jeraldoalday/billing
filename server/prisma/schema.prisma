@@ -30,6 +30,7 @@ model Organization {
   invoices       Invoice[]
   paymentMethods PaymentMethod[]
   payments       Payment[]
+  usageEvents    UsageEvent[]
 
   @@map("organizations")
 }
@@ -136,6 +137,7 @@ model Customer {
   subscriptions  Subscription[]
   invoices       Invoice[]
   paymentMethods PaymentMethod[]
+  usageEvents    UsageEvent[]
 
   @@unique([organizationId, email])
   @@index([organizationId])
@@ -169,8 +171,9 @@ model Subscription {
   createdAt          DateTime     @default(now())
   updatedAt          DateTime     @updatedAt
 
-  events   SubscriptionEvent[]
-  invoices Invoice[]
+  events      SubscriptionEvent[]
+  invoices    Invoice[]
+  usageEvents UsageEvent[]
 
   @@index([organizationId])
   @@index([customerId])
@@ -323,4 +326,37 @@ model Payment {
   @@index([organizationId])
   @@index([invoiceId])
   @@map("payments")
+}
+
+/// One unit-of-usage recording for metered billing (Day 7). `metric` is a
+/// free-form name matched against a USAGE/TIERED Plan's `usageMetric` (see
+/// src/domain/pricing.ts) when src/services/invoice.service.ts aggregates
+/// usage into an invoice line item at generation time — events whose metric
+/// no plan bills for are simply never aggregated. `timestamp` is when the
+/// usage occurred (caller-supplied, defaults to ingestion time), distinct
+/// from `createdAt` (when the row was written), since usage is often
+/// reported after the fact. `idempotencyKey`, when the caller supplies one,
+/// makes re-sending the same ingestion request safe: a duplicate key for the
+/// same subscription is rejected instead of double-counting usage. SQLite
+/// treats each NULL as distinct for a unique index, so subscriptions that
+/// never send a key are unaffected.
+model UsageEvent {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  customerId     String
+  customer       Customer     @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  subscriptionId String
+  subscription   Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  metric         String
+  quantity       Int
+  timestamp      DateTime
+  idempotencyKey String?
+  createdAt      DateTime     @default(now())
+
+  @@unique([subscriptionId, idempotencyKey])
+  @@index([organizationId])
+  @@index([customerId])
+  @@index([subscriptionId, metric, timestamp])
+  @@map("usage_events")
 }
