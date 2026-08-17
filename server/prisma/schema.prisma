@@ -22,12 +22,14 @@ model Organization {
   // reused, even under concurrent invoice generation.
   invoiceSequence Int @default(0)
 
-  users         User[]
-  products      Product[]
-  plans         Plan[]
-  customers     Customer[]
-  subscriptions Subscription[]
-  invoices      Invoice[]
+  users          User[]
+  products       Product[]
+  plans          Plan[]
+  customers      Customer[]
+  subscriptions  Subscription[]
+  invoices       Invoice[]
+  paymentMethods PaymentMethod[]
+  payments       Payment[]
 
   @@map("organizations")
 }
@@ -131,8 +133,9 @@ model Customer {
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
 
-  subscriptions Subscription[]
-  invoices      Invoice[]
+  subscriptions  Subscription[]
+  invoices       Invoice[]
+  paymentMethods PaymentMethod[]
 
   @@unique([organizationId, email])
   @@index([organizationId])
@@ -233,6 +236,7 @@ model Invoice {
   updatedAt      DateTime     @updatedAt
 
   lineItems InvoiceLineItem[]
+  payments  Payment[]
 
   @@unique([organizationId, number])
   @@index([organizationId])
@@ -263,4 +267,60 @@ model InvoiceLineItem {
 
   @@index([invoiceId])
   @@map("invoice_line_items")
+}
+
+/// A tokenized card on file for a Customer. The raw card number is never
+/// stored — only what's needed to display it (`brand`/`last4`/expiry) and
+/// what src/lib/paymentGateway.ts needs to simulate an outcome for it. A
+/// Customer may have several; at most one is `isDefault` at a time (enforced
+/// in src/services/payment.service.ts, not the schema, since SQLite has no
+/// partial unique index).
+model PaymentMethod {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  customerId     String
+  customer       Customer     @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  brand          String
+  last4          String
+  expMonth       Int
+  expYear        Int
+  isDefault      Boolean      @default(false)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  payments Payment[]
+
+  @@index([organizationId])
+  @@index([customerId])
+  @@map("payment_methods")
+}
+
+/// One charge attempt sequence against an Invoice (src/services/
+/// payment.service.ts#chargeInvoice retries a single logical charge
+/// in-process through src/lib/retry.ts, so this row is written once the
+/// gateway's outcome is final, not once per HTTP-level retry). `status`
+/// (PaymentStatus: SUCCEEDED/FAILED) and `attemptNumber` (how many gateway
+/// attempts this charge made before it was recorded) are plain
+/// string/int like the other status fields in this schema — see
+/// src/domain/payment.ts. `failureCode` mirrors
+/// src/lib/paymentGateway.ts's ChargeFailureCode when `status` is FAILED.
+model Payment {
+  id              String        @id @default(cuid())
+  organizationId  String
+  organization    Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  invoiceId       String
+  invoice         Invoice       @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  paymentMethodId String
+  paymentMethod   PaymentMethod @relation(fields: [paymentMethodId], references: [id])
+  amount          Int
+  currency        String
+  status          String
+  attemptNumber   Int
+  failureCode     String?
+  createdAt       DateTime      @default(now())
+
+  @@index([organizationId])
+  @@index([invoiceId])
+  @@map("payments")
 }
