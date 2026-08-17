@@ -8,13 +8,15 @@ import {
   type InvoiceStatus,
 } from '../domain/invoice';
 import { periodAmountForProration } from '../domain/proration';
+import { calculateUsageAmount } from '../domain/usage';
 import * as subscriptionService from './subscription.service';
+import * as usageService from './usage.service';
 import type { GenerateInvoiceInput, ListInvoicesQuery } from '../validators/invoice';
 
 const WITH_LINE_ITEMS = { lineItems: true };
 
 interface DraftLineItem {
-  type: 'PLAN' | 'PRORATION';
+  type: 'PLAN' | 'PRORATION' | 'USAGE';
   description: string;
   quantity: number;
   unitAmount: number;
@@ -24,9 +26,9 @@ interface DraftLineItem {
 
 // The plan's recurring price for the period, as a single line item. Only
 // FLAT plans have a fixed amount known up front; TIERED/USAGE plans bill
-// based on metered consumption at period end, which Day 7 wires in — until
-// then they simply contribute no plan line item (an invoice for a pure
-// usage-based subscription may legitimately have $0 subtotal here).
+// based on metered consumption at period end (see usageLineItem below), so
+// they simply contribute no plan line item here (an invoice for a pure
+// usage-based subscription may legitimately have $0 from this line).
 function planLineItem(plan: {
   name: string;
   interval: string;
@@ -42,6 +44,61 @@ function planLineItem(plan: {
     description: `${plan.name} (${plan.interval.toLowerCase()}ly)`,
     quantity: 1,
     unitAmount: amount,
+    amount,
+  };
+}
+
+// The charge for metered consumption during the period, as a single line
+// item. Only applies to USAGE/TIERED plans (a FLAT plan has no
+// `usageMetric` and contributes nothing here); aggregates UsageEvent rows
+// scoped to this subscription and the plan's metric over
+// [currentPeriodStart, currentPeriodEnd), matching how
+// src/services/usage.service.ts treats every other period aggregation in
+// this codebase. Generating no more than one non-VOID invoice per period
+// (enforced by generateInvoice below) is what keeps the same usage from
+// ever being billed twice.
+async function usageLineItem(subscription: {
+  id: string;
+  organizationId: string;
+  currentPeriodStart: Date;
+  currentPeriodEnd: Date;
+  plan: {
+    pricingModel: string;
+    usageMetric: string | null;
+    usageUnitAmount: number | null;
+    tiers: { order: number; upTo: number | null; unitAmount: number; flatFee: number }[];
+  };
+}): Promise<DraftLineItem | null> {
+  const { plan } = subscription;
+  if (plan.pricingModel === 'FLAT' || !plan.usageMetric) {
+    return null;
+  }
+
+  const quantity = await usageService.sumUsageForMetric(
+    subscription.organizationId,
+    subscription.id,
+    plan.usageMetric,
+    subscription.currentPeriodStart,
+    subscription.currentPeriodEnd,
+  );
+  if (quantity <= 0) {
+    return null;
+  }
+
+  const amount = calculateUsageAmount(plan, plan.tiers, quantity);
+  if (amount <= 0) {
+    return null;
+  }
+
+  return {
+    type: 'USAGE',
+    description: `${plan.usageMetric} usage (${quantity} units)`,
+    quantity,
+    // Graduated tiering doesn't have a single per-unit rate, so the
+    // recorded unitAmount is the effective average for display purposes
+    // only — `amount` (the actual charge) is always computed independently.
+    unitAmount:
+      plan.pricingModel === 'USAGE' ? (plan.usageUnitAmount ?? 0) : Math.round(amount / quantity),
     amount,
   };
 }
@@ -109,9 +166,16 @@ export async function generateInvoice(organizationId: string, input: GenerateInv
   // generates no PLAN charge (an invoice with only proration/usage line
   // items, or none at all, is still valid to draft — e.g. a plan change
   // made mid-trial for when the trial ends).
-  const plan = subscription.status === 'TRIALING' ? null : planLineItem(subscription.plan);
+  const isTrialing = subscription.status === 'TRIALING';
+  const plan = isTrialing ? null : planLineItem(subscription.plan);
   if (plan) {
     lineItems.push(plan);
+  }
+  // A trialing subscription hasn't started paying for consumption either,
+  // matching how the PLAN line item is skipped above.
+  const usage = isTrialing ? null : await usageLineItem(subscription);
+  if (usage) {
+    lineItems.push(usage);
   }
   lineItems.push(...(await uninvoicedProrationLineItems(subscription.id)));
 

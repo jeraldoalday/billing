@@ -2,12 +2,14 @@
 // `status` and InvoiceLineItem's `type` columns are plain strings. These
 // tuples are the single source of truth for the valid values, consumed by
 // Zod schemas (z.enum) and anywhere else that needs the allowed set at
-// runtime.
+// runtime. InvoiceLineItemType's USAGE covers metered consumption on a
+// USAGE/TIERED plan, aggregated from UsageEvent rows by
+// src/services/invoice.service.ts (Day 7).
 
 export const INVOICE_STATUSES = ['DRAFT', 'OPEN', 'PAID', 'VOID'] as const;
 export type InvoiceStatus = (typeof INVOICE_STATUSES)[number];
 
-export const INVOICE_LINE_ITEM_TYPES = ['PLAN', 'PRORATION'] as const;
+export const INVOICE_LINE_ITEM_TYPES = ['PLAN', 'PRORATION', 'USAGE'] as const;
 export type InvoiceLineItemType = (typeof INVOICE_LINE_ITEM_TYPES)[number];
 
 // The invoice status state machine: DRAFT -> OPEN -> PAID | VOID. An invoice
