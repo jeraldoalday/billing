@@ -2,7 +2,9 @@ import { Router } from 'express';
 import { requireAuth } from '../middleware/auth';
 import { ApiError } from '../middleware/errorHandler';
 import * as invoiceService from '../services/invoice.service';
+import * as paymentService from '../services/payment.service';
 import { generateInvoiceSchema, listInvoicesQuerySchema } from '../validators/invoice';
+import { chargeInvoiceSchema } from '../validators/payment';
 
 export const invoicesRouter = Router();
 
@@ -71,6 +73,29 @@ invoicesRouter.post('/:id/void', async (req, res, next) => {
 
     const invoice = await invoiceService.voidInvoice(req.auth.orgId, req.params.id);
     res.json({ invoice });
+  } catch (err) {
+    next(err);
+  }
+});
+
+invoicesRouter.post('/:id/charge', async (req, res, next) => {
+  try {
+    if (!req.auth) throw ApiError.unauthorized();
+
+    const input = chargeInvoiceSchema.parse(req.body);
+    const payment = await paymentService.chargeInvoice(req.auth.orgId, req.params.id, input);
+    res.status(201).json({ payment });
+  } catch (err) {
+    next(err);
+  }
+});
+
+invoicesRouter.get('/:id/payments', async (req, res, next) => {
+  try {
+    if (!req.auth) throw ApiError.unauthorized();
+
+    const payments = await paymentService.listPaymentsForInvoice(req.auth.orgId, req.params.id);
+    res.json({ payments });
   } catch (err) {
     next(err);
   }
