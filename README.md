@@ -96,7 +96,7 @@ next — including for the automated daily build (see `AGENT.md`).
 - [x] Day 5: Invoicing engine (line items, tax, numbering, status state machine)
 - [x] Day 6: Payments via a mock gateway abstraction, retries
 - [x] Day 7: Usage-based billing / metering
-- [ ] Day 8: Dunning (failed-payment retry) and outbound webhooks
+- [x] Day 8: Dunning (failed-payment retry) and outbound webhooks
 - [ ] Day 9: Coupons/discounts, refined tax rules, MRR/churn/ARPU reporting
 - [ ] Day 10: Background jobs: recurring billing runner
 - [ ] Day 11: Frontend: scaffold, auth pages
