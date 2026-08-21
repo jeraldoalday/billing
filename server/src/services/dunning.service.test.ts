@@ -3,11 +3,11 @@ import { prisma } from '../lib/prisma';
 import { RecordingWebhookTransport } from '../lib/webhookTransport';
 import { MAX_DUNNING_ATTEMPTS } from '../domain/dunning';
 import { createCustomer } from './customer.service';
-import { finalizeInvoice, generateInvoice, getInvoice, voidInvoice } from './invoice.service';
+import { finalizeInvoice, generateInvoice, getInvoice, markInvoicePaid, voidInvoice } from './invoice.service';
 import { addPaymentMethod, chargeInvoice } from './payment.service';
 import { createPlan } from './plan.service';
 import { createProduct } from './product.service';
-import { createSubscription } from './subscription.service';
+import { cancelSubscription, createSubscription } from './subscription.service';
 import * as webhookService from './webhook.service';
 import {
   cancelDunning,
@@ -248,22 +248,76 @@ describe('runDunningAttempt', () => {
     await expect(prisma.payment.count()).resolves.toBe(0);
   });
 
-  it('closes the campaign without charging when the invoice was paid elsewhere', async () => {
-    const { org, invoice, customer } = await makeBillingFixture();
+  it('closes the campaign as soon as the invoice is paid with another card', async () => {
+    const { org, invoice, customer, subscription } = await makeBillingFixture();
     const now = new Date('2026-06-01T00:00:00.000Z');
     const campaign = await startDunning(org.id, invoice.id, { now });
 
     const paymentMethod = await replaceCard(org.id, customer.id, CARD.succeeds);
     await chargeInvoice(org.id, invoice.id, { paymentMethodId: paymentMethod.id });
-    const paymentsBefore = await prisma.payment.count();
+
+    // The campaign resolves on the payment, not on the next sweep, so the
+    // customer isn't left past due with a settled invoice.
+    const resolved = await getDunningCampaign(org.id, campaign.id);
+    expect(resolved.status).toBe('RECOVERED');
+    expect(resolved.attempts).toHaveLength(0);
+
+    const updated = await prisma.subscription.findUniqueOrThrow({ where: { id: subscription.id } });
+    expect(updated.status).toBe('ACTIVE');
+
+    await expect(
+      runDunningAttempt(org.id, campaign.id, { now: new Date(now.getTime() + DAY_MS) }),
+    ).rejects.toMatchObject({ status: 409 });
+  });
+
+  it('closes the campaign when the invoice is marked paid administratively', async () => {
+    const { org, invoice, subscription } = await makeBillingFixture();
+    const campaign = await startDunning(org.id, invoice.id);
+
+    await markInvoicePaid(org.id, invoice.id);
+
+    await expect(getDunningCampaign(org.id, campaign.id)).resolves.toMatchObject({
+      status: 'RECOVERED',
+    });
+    const updated = await prisma.subscription.findUniqueOrThrow({ where: { id: subscription.id } });
+    expect(updated.status).toBe('ACTIVE');
+  });
+
+  it('emits a single recovery event when a retry settles the invoice', async () => {
+    const transport = new RecordingWebhookTransport();
+    webhookService.setWebhookTransport(transport);
+
+    const { org, invoice, customer } = await makeBillingFixture();
+    await webhookService.createWebhookEndpoint(org.id, {
+      url: 'https://hooks.test/dunning',
+      enabledEvents: ['dunning.recovered'],
+    });
+
+    const now = new Date('2026-06-01T00:00:00.000Z');
+    const campaign = await startDunning(org.id, invoice.id, { now });
+    await replaceCard(org.id, customer.id, CARD.succeeds);
+    await runDunningAttempt(org.id, campaign.id, { now: new Date(now.getTime() + DAY_MS) });
+
+    expect(transport.requests).toHaveLength(1);
+    await expect(
+      prisma.subscriptionEvent.count({ where: { type: 'DUNNING_RECOVERED' } }),
+    ).resolves.toBe(1);
+  });
+
+  it('calls the campaign off when the subscription was canceled meanwhile', async () => {
+    const { org, invoice, subscription } = await makeBillingFixture();
+    const now = new Date('2026-06-01T00:00:00.000Z');
+    const campaign = await startDunning(org.id, invoice.id, { now });
+    await cancelSubscription(org.id, subscription.id, { atPeriodEnd: false });
 
     const result = await runDunningAttempt(org.id, campaign.id, {
       now: new Date(now.getTime() + DAY_MS),
     });
 
-    expect(result.campaign.status).toBe('RECOVERED');
+    expect(result.campaign.status).toBe('CANCELED');
     expect(result.outcome).toBeNull();
-    await expect(prisma.payment.count()).resolves.toBe(paymentsBefore);
+    await expect(prisma.payment.count()).resolves.toBe(0);
+    await expect(getInvoice(org.id, invoice.id)).resolves.toMatchObject({ status: 'OPEN' });
   });
 
   it('calls the campaign off when the invoice was voided', async () => {
