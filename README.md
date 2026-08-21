@@ -42,6 +42,46 @@ Run the server's tests:
 npm run test:server
 ```
 
+## Dunning and webhooks
+
+A charge that is declined (`POST /invoices/:id/charge`) opens a **dunning campaign**
+for that invoice and moves the subscription to `PAST_DUE`. The campaign retries the
+customer's default card 1, 3 and 7 days after the first failure; if the last retry
+still fails, the subscription is canceled and the invoice is left open, since the
+amount is still owed. Settling the invoice at any point — a successful retry, a charge
+with a different card, or marking it paid administratively — closes the campaign and
+returns the subscription to `ACTIVE`.
+
+```
+POST /dunning/run             run every retry that is due (accepts `asOf` to simulate a later date)
+GET  /dunning                 list campaigns (filter by status/subscriptionId/invoiceId)
+GET  /dunning/:id             a campaign with its invoice, subscription, and attempt history
+POST /dunning/:id/retry       retry now, ignoring the schedule
+POST /dunning/:id/cancel      call off a campaign settled outside the system
+```
+
+Domain events (`invoice.*`, `payment.*`, `subscription.*`, `dunning.*`) are delivered
+to the endpoints an organization registers. An endpoint subscribes with exact event
+types, a namespace wildcard (`invoice.*`), or `*`.
+
+```
+POST   /webhook-endpoints                  register an endpoint (returns the signing secret once)
+GET    /webhook-endpoints                  list endpoints (secrets masked)
+PATCH  /webhook-endpoints/:id              change url/description/subscriptions/active
+POST   /webhook-endpoints/:id/rotate-secret
+DELETE /webhook-endpoints/:id
+GET    /webhook-deliveries                 the delivery log (filter by endpoint/type/status)
+POST   /webhook-deliveries/:id/redeliver   send a copy of a past event
+POST   /webhook-deliveries/retry-due       run every delivery retry that is due
+```
+
+Each request carries a `webhook-signature` header of the form `t=<unix>,v1=<hmac>`,
+where the HMAC-SHA256 is taken over `"<t>.<raw body>"` with the endpoint's secret.
+Verify it against the raw body before parsing, and reject timestamps outside a few
+minutes of your clock — `verifyWebhookSignature` in `server/src/domain/webhook.ts` is
+the reference implementation. Failed deliveries are retried up to five times with
+exponential backoff.
+
 ## Roadmap
 
 This project is being built incrementally, one day of work at a time. Each checked box
