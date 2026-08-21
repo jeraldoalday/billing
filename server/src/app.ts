@@ -12,6 +12,8 @@ import { plansRouter } from './routes/plans';
 import { productsRouter } from './routes/products';
 import { subscriptionsRouter } from './routes/subscriptions';
 import { usageEventsRouter } from './routes/usageEvents';
+import { webhookDeliveriesRouter } from './routes/webhookDeliveries';
+import { webhookEndpointsRouter } from './routes/webhookEndpoints';
 
 export function createApp(): Express {
   const app = express();
@@ -30,6 +32,8 @@ export function createApp(): Express {
   app.use('/invoices', invoicesRouter);
   app.use('/payment-methods', paymentMethodsRouter);
   app.use('/usage-events', usageEventsRouter);
+  app.use('/webhook-endpoints', webhookEndpointsRouter);
+  app.use('/webhook-deliveries', webhookDeliveriesRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);
