@@ -9,6 +9,7 @@ import {
 } from '../domain/invoice';
 import { periodAmountForProration } from '../domain/proration';
 import { calculateUsageAmount } from '../domain/usage';
+import * as dunningService from './dunning.service';
 import * as subscriptionService from './subscription.service';
 import * as usageService from './usage.service';
 import * as webhookService from './webhook.service';
@@ -307,6 +308,10 @@ export async function finalizeInvoice(organizationId: string, invoiceId: string)
 export async function markInvoicePaid(organizationId: string, invoiceId: string) {
   const invoice = await transitionInvoice(organizationId, invoiceId, 'PAID', { paidAt: new Date() });
   await webhookService.emitEvent(organizationId, 'invoice.paid', invoiceEventData(invoice));
+  // However the invoice got settled, any recovery campaign for it is over —
+  // this is the single transition every settlement passes through, so the
+  // subscription leaves PAST_DUE immediately instead of at the next sweep.
+  await dunningService.recoverDunningForInvoice(organizationId, invoice.id);
   return invoice;
 }
 

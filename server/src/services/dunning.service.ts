@@ -245,6 +245,15 @@ export async function runDunningAttempt(
     return { campaign: resolved, outcome: null };
   }
 
+  // The subscription may have been canceled since the campaign opened (by
+  // the customer, or by support). Retrying its card anyway would keep
+  // charging someone who has already left, so the campaign is simply called
+  // off — the invoice stays OPEN, since the amount is still owed.
+  if (campaign.subscription.status === 'CANCELED') {
+    const resolved = await resolveCampaign(campaign, 'CANCELED', now);
+    return { campaign: resolved, outcome: null };
+  }
+
   const decision = decideNextDunningStep(campaign, now);
 
   if (decision.status === 'EXHAUSTED') {
@@ -332,9 +341,33 @@ export async function runDunningAttempt(
 // subscription returns to ACTIVE from PAST_DUE. A subscription that was
 // canceled in the meantime stays canceled.
 async function recoverCampaign(campaign: CampaignWithRelations, now: Date, attemptsMade?: number) {
+  // A retry that succeeds settles the invoice, and settling an invoice
+  // recovers its campaign (see recoverDunningForInvoice), so by the time the
+  // attempt's own outcome is applied the campaign is often already
+  // recovered. Re-reading here keeps that from emitting a second
+  // dunning.recovered event and a duplicate DUNNING_RECOVERED audit entry —
+  // only the attempt count still needs writing.
+  const fresh = await prisma.dunningCampaign.findUnique({
+    where: { id: campaign.id },
+    include: WITH_RELATIONS,
+  });
+  if (!fresh) {
+    return campaign;
+  }
+  if (isTerminalDunningStatus(fresh.status as DunningStatus)) {
+    if (attemptsMade === undefined || fresh.attemptsMade === attemptsMade) {
+      return fresh;
+    }
+    return prisma.dunningCampaign.update({
+      where: { id: fresh.id },
+      data: { attemptsMade },
+      include: WITH_RELATIONS,
+    });
+  }
+
   const resolved = await resolveCampaign(campaign, 'RECOVERED', now, { attemptsMade });
 
-  if (campaign.subscription.status === 'PAST_DUE') {
+  if (fresh.subscription.status === 'PAST_DUE') {
     await prisma.$transaction(async (tx) => {
       await tx.subscription.update({
         where: { id: campaign.subscriptionId },
@@ -359,6 +392,29 @@ async function recoverCampaign(campaign: CampaignWithRelations, now: Date, attem
   });
 
   return resolved;
+}
+
+// Closes an in-flight campaign because its invoice has been settled, from
+// wherever that happened: a dunning retry, a manual charge with a different
+// card, or an administrator marking the invoice paid. Called by
+// src/services/invoice.service.ts on the OPEN -> PAID transition, which is
+// the one place every settlement funnels through, so a customer who pays
+// never stays PAST_DUE waiting for the next sweep to notice.
+export async function recoverDunningForInvoice(
+  organizationId: string,
+  invoiceId: string,
+  now: Date = new Date(),
+) {
+  const campaign = await prisma.dunningCampaign.findFirst({
+    where: { invoiceId, organizationId },
+    include: WITH_RELATIONS,
+  });
+
+  if (!campaign || isTerminalDunningStatus(campaign.status as DunningStatus)) {
+    return null;
+  }
+
+  return recoverCampaign(campaign, now);
 }
 
 async function emitExhausted(campaign: CampaignWithRelations) {
