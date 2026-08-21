@@ -5,6 +5,7 @@ import { logger } from './lib/logger';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler';
 import { authRouter } from './routes/auth';
 import { customersRouter } from './routes/customers';
+import { dunningRouter } from './routes/dunning';
 import { healthRouter } from './routes/health';
 import { invoicesRouter } from './routes/invoices';
 import { paymentMethodsRouter } from './routes/paymentMethods';
@@ -29,6 +30,7 @@ export function createApp(): Express {
   app.use('/plans', plansRouter);
   app.use('/customers', customersRouter);
   app.use('/subscriptions', subscriptionsRouter);
+  app.use('/dunning', dunningRouter);
   app.use('/invoices', invoicesRouter);
   app.use('/payment-methods', paymentMethodsRouter);
   app.use('/usage-events', usageEventsRouter);
