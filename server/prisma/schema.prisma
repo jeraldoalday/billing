@@ -32,18 +32,22 @@ model Organization {
   payments       Payment[]
   usageEvents    UsageEvent[]
 
+  dunningCampaigns  DunningCampaign[]
+  webhookEndpoints  WebhookEndpoint[]
+  webhookDeliveries WebhookDelivery[]
+
   @@map("organizations")
 }
 
 model User {
-  id             String   @id @default(cuid())
-  email          String   @unique
+  id             String       @id @default(cuid())
+  email          String       @unique
   passwordHash   String
   name           String?
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
 
   @@index([organizationId])
   @@map("users")
@@ -171,9 +175,10 @@ model Subscription {
   createdAt          DateTime     @default(now())
   updatedAt          DateTime     @updatedAt
 
-  events      SubscriptionEvent[]
-  invoices    Invoice[]
-  usageEvents UsageEvent[]
+  events           SubscriptionEvent[]
+  invoices         Invoice[]
+  usageEvents      UsageEvent[]
+  dunningCampaigns DunningCampaign[]
 
   @@index([organizationId])
   @@index([customerId])
@@ -240,6 +245,7 @@ model Invoice {
 
   lineItems InvoiceLineItem[]
   payments  Payment[]
+  dunning   DunningCampaign?
 
   @@unique([organizationId, number])
   @@index([organizationId])
@@ -256,17 +262,17 @@ model Invoice {
 /// once). `amount` is signed (minor currency units) — negative for a
 /// proration credit.
 model InvoiceLineItem {
-  id                  String            @id @default(cuid())
+  id                  String             @id @default(cuid())
   invoiceId           String
-  invoice             Invoice           @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  invoice             Invoice            @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
   type                String
   description         String
-  quantity            Int               @default(1)
+  quantity            Int                @default(1)
   unitAmount          Int
   amount              Int
-  subscriptionEventId String?           @unique
+  subscriptionEventId String?            @unique
   subscriptionEvent   SubscriptionEvent? @relation(fields: [subscriptionEventId], references: [id])
-  createdAt           DateTime          @default(now())
+  createdAt           DateTime           @default(now())
 
   @@index([invoiceId])
   @@map("invoice_line_items")
@@ -359,4 +365,123 @@ model UsageEvent {
   @@index([customerId])
   @@index([subscriptionId, metric, timestamp])
   @@map("usage_events")
+}
+
+/// A failed-payment recovery campaign for a single OPEN Invoice. Created the
+/// first time a charge against that invoice fails (see
+/// src/services/payment.service.ts) and drives the retry schedule in
+/// src/domain/dunning.ts: retry on day 1, 3 and 7, then give up and cancel
+/// the subscription. `invoiceId` is unique so an invoice can only ever be in
+/// one campaign — a second failure on an invoice already in dunning
+/// re-schedules the existing campaign instead of starting a parallel one.
+///
+/// SQLite has no native enum type, so `status` (DunningStatus:
+/// SCHEDULED/RECOVERED/EXHAUSTED/CANCELED) is a plain string constrained by
+/// Zod like the other status fields in this schema.
+model DunningCampaign {
+  id              String       @id @default(cuid())
+  organizationId  String
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  invoiceId       String       @unique
+  invoice         Invoice      @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  subscriptionId  String
+  subscription    Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  status          String
+  attemptsMade    Int          @default(0)
+  // When the next retry becomes due. Null once the campaign reaches a
+  // terminal status, so "due work" is a single indexed query rather than a
+  // scan that has to re-derive the schedule for every campaign.
+  nextAttemptAt   DateTime?
+  startedAt       DateTime     @default(now())
+  resolvedAt      DateTime?
+  lastFailureCode String?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  attempts DunningAttempt[]
+
+  @@index([organizationId])
+  @@index([subscriptionId])
+  @@index([status, nextAttemptAt])
+  @@map("dunning_campaigns")
+}
+
+/// One retry made by a DunningCampaign. Unlike Payment (which records the
+/// final outcome of a logical charge), this is the campaign's own audit
+/// trail: what was scheduled, when it actually ran, and how it went.
+/// `outcome` (DunningAttemptOutcome: SUCCEEDED/FAILED/SKIPPED) is a plain
+/// string; SKIPPED covers an attempt that never reached the gateway (e.g.
+/// the customer has no payment method on file), which is a failure of the
+/// campaign but not a decline by the processor.
+model DunningAttempt {
+  id            String          @id @default(cuid())
+  campaignId    String
+  campaign      DunningCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  attemptNumber Int
+  scheduledFor  DateTime
+  attemptedAt   DateTime        @default(now())
+  outcome       String
+  failureCode   String?
+  paymentId     String?
+  createdAt     DateTime        @default(now())
+
+  @@unique([campaignId, attemptNumber])
+  @@index([campaignId])
+  @@map("dunning_attempts")
+}
+
+/// A customer-configured HTTPS destination for outbound domain events.
+/// `secret` is generated server-side and only ever returned in full from the
+/// create response (see src/services/webhook.service.ts) — every later read
+/// returns a masked form, since the secret is what proves a delivery really
+/// came from us (HMAC, see src/domain/webhook.ts). `enabledEvents` is a JSON
+/// array of event-type patterns (SQLite has no array column); `["*"]` means
+/// every event, and `"invoice.*"` matches a whole namespace.
+model WebhookEndpoint {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  url            String
+  description    String?
+  secret         String
+  enabledEvents  String
+  active         Boolean      @default(true)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  deliveries WebhookDelivery[]
+
+  @@index([organizationId])
+  @@map("webhook_endpoints")
+}
+
+/// One event queued for one endpoint. The payload is serialized at emit time
+/// and never re-derived, so a redelivery sends byte-identical JSON (and
+/// therefore the same signature) as the original attempt, even if the
+/// underlying invoice/subscription has changed since. `status`
+/// (WebhookDeliveryStatus: PENDING/SUCCEEDED/FAILED) plus `nextAttemptAt`
+/// drive the retry sweep in src/services/webhook.service.ts; FAILED is only
+/// reached once the attempt budget in src/domain/webhook.ts is exhausted.
+model WebhookDelivery {
+  id             String          @id @default(cuid())
+  organizationId String
+  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  endpointId     String
+  endpoint       WebhookEndpoint @relation(fields: [endpointId], references: [id], onDelete: Cascade)
+  eventId        String
+  eventType      String
+  payload        String
+  status         String
+  attemptsMade   Int             @default(0)
+  nextAttemptAt  DateTime?
+  responseStatus Int?
+  error          String?
+  deliveredAt    DateTime?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  @@index([organizationId])
+  @@index([endpointId])
+  @@index([status, nextAttemptAt])
+  @@map("webhook_deliveries")
 }
