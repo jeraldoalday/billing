@@ -5,6 +5,7 @@ import { addInterval } from '../domain/subscription';
 import type { BillingInterval } from '../domain/pricing';
 import * as customerService from './customer.service';
 import * as planService from './plan.service';
+import * as webhookService from './webhook.service';
 import { TIERS_ORDERED } from './plan.service';
 import type {
   CancelSubscriptionInput,
@@ -35,7 +36,7 @@ export async function createSubscription(organizationId: string, input: CreateSu
   const isTrial = trialEnd !== null;
   const currentPeriodEnd = trialEnd ?? addInterval(now, plan.interval as BillingInterval);
 
-  return prisma.$transaction(async (tx) => {
+  const created = await prisma.$transaction(async (tx) => {
     const subscription = await tx.subscription.create({
       data: {
         organizationId,
@@ -59,6 +60,35 @@ export async function createSubscription(organizationId: string, input: CreateSu
 
     return subscription;
   });
+
+  await webhookService.emitEvent(
+    organizationId,
+    'subscription.created',
+    subscriptionEventData(created),
+  );
+
+  return created;
+}
+
+// The shape every subscription.* event carries. A summary, for the same
+// reason invoice events carry one (see src/services/invoice.service.ts):
+// receivers that need the full record fetch it by id.
+function subscriptionEventData(subscription: {
+  id: string;
+  customerId: string;
+  planId: string;
+  status: string;
+  currentPeriodStart: Date;
+  currentPeriodEnd: Date;
+}) {
+  return {
+    subscriptionId: subscription.id,
+    customerId: subscription.customerId,
+    planId: subscription.planId,
+    status: subscription.status,
+    currentPeriodStart: subscription.currentPeriodStart.toISOString(),
+    currentPeriodEnd: subscription.currentPeriodEnd.toISOString(),
+  };
 }
 
 export async function listSubscriptions(organizationId: string, query: ListSubscriptionsQuery) {
@@ -102,8 +132,8 @@ export async function cancelSubscription(
 
   const now = new Date();
 
-  return prisma.$transaction(async (tx) => {
-    const updated = await tx.subscription.update({
+  const updated = await prisma.$transaction(async (tx) => {
+    const canceled = await tx.subscription.update({
       where: { id: subscriptionId },
       data: input.atPeriodEnd
         ? { cancelAt: subscription.currentPeriodEnd }
@@ -118,8 +148,23 @@ export async function cancelSubscription(
       },
     });
 
-    return updated;
+    return canceled;
   });
+
+  // A cancellation scheduled for period end hasn't ended anything yet, so it
+  // is an update rather than a cancellation as far as receivers are
+  // concerned — the subscription.canceled event fires when it actually stops.
+  await webhookService.emitEvent(
+    organizationId,
+    input.atPeriodEnd ? 'subscription.updated' : 'subscription.canceled',
+    {
+      ...subscriptionEventData(updated),
+      cancelAt: updated.cancelAt?.toISOString() ?? null,
+      canceledAt: updated.canceledAt?.toISOString() ?? null,
+    },
+  );
+
+  return updated;
 }
 
 export interface ChangePlanResult {
@@ -181,6 +226,12 @@ export async function changeSubscriptionPlan(
     return sub;
   });
 
+  await webhookService.emitEvent(organizationId, 'subscription.updated', {
+    ...subscriptionEventData(updated),
+    previousPlanId: subscription.planId,
+    prorationAmount: proration.netAmount,
+  });
+
   return { subscription: updated, proration };
 }
 
@@ -197,8 +248,8 @@ export async function endTrial(organizationId: string, subscriptionId: string) {
   const now = new Date();
   const currentPeriodEnd = addInterval(now, subscription.plan.interval as BillingInterval);
 
-  return prisma.$transaction(async (tx) => {
-    const updated = await tx.subscription.update({
+  const updated = await prisma.$transaction(async (tx) => {
+    const active = await tx.subscription.update({
       where: { id: subscriptionId },
       data: {
         status: 'ACTIVE',
@@ -213,6 +264,13 @@ export async function endTrial(organizationId: string, subscriptionId: string) {
       data: { subscriptionId, type: 'TRIAL_ENDED' },
     });
 
-    return updated;
+    return active;
   });
+
+  await webhookService.emitEvent(organizationId, 'subscription.updated', {
+    ...subscriptionEventData(updated),
+    trialEnded: true,
+  });
+
+  return updated;
 }

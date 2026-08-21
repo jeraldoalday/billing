@@ -11,6 +11,7 @@ import { periodAmountForProration } from '../domain/proration';
 import { calculateUsageAmount } from '../domain/usage';
 import * as subscriptionService from './subscription.service';
 import * as usageService from './usage.service';
+import * as webhookService from './webhook.service';
 import type { GenerateInvoiceInput, ListInvoicesQuery } from '../validators/invoice';
 
 const WITH_LINE_ITEMS = { lineItems: true };
@@ -183,7 +184,7 @@ export async function generateInvoice(organizationId: string, input: GenerateInv
   const taxAmount = calculateTax(subtotal, subscription.customer.country);
   const total = subtotal + taxAmount;
 
-  return prisma.$transaction(async (tx) => {
+  const invoice = await prisma.$transaction(async (tx) => {
     const organization = await tx.organization.update({
       where: { id: organizationId },
       data: { invoiceSequence: { increment: 1 } },
@@ -207,6 +208,38 @@ export async function generateInvoice(organizationId: string, input: GenerateInv
       include: WITH_LINE_ITEMS,
     });
   });
+
+  await webhookService.emitEvent(organizationId, 'invoice.created', invoiceEventData(invoice));
+
+  return invoice;
+}
+
+// The shape every invoice.* event carries. Deliberately a summary rather
+// than the whole row: a receiver that needs line items can fetch the invoice
+// by id, and keeping payloads small keeps them cheap to store and re-sign
+// for every retry.
+function invoiceEventData(invoice: {
+  id: string;
+  number: string;
+  status: string;
+  customerId: string;
+  subscriptionId: string;
+  currency: string;
+  subtotal: number;
+  taxAmount: number;
+  total: number;
+}) {
+  return {
+    invoiceId: invoice.id,
+    number: invoice.number,
+    status: invoice.status,
+    customerId: invoice.customerId,
+    subscriptionId: invoice.subscriptionId,
+    currency: invoice.currency,
+    subtotal: invoice.subtotal,
+    taxAmount: invoice.taxAmount,
+    total: invoice.total,
+  };
 }
 
 export async function listInvoices(organizationId: string, query: ListInvoicesQuery) {
@@ -263,19 +296,24 @@ async function transitionInvoice(
 // DRAFT -> OPEN: the invoice is issued to the customer and its amounts are
 // now final (a DRAFT can still be regenerated/voided freely; an OPEN one is
 // the thing Day 6's payment gateway will actually try to charge).
-export function finalizeInvoice(organizationId: string, invoiceId: string) {
-  return transitionInvoice(organizationId, invoiceId, 'OPEN', { issuedAt: new Date() });
+export async function finalizeInvoice(organizationId: string, invoiceId: string) {
+  const invoice = await transitionInvoice(organizationId, invoiceId, 'OPEN', { issuedAt: new Date() });
+  await webhookService.emitEvent(organizationId, 'invoice.finalized', invoiceEventData(invoice));
+  return invoice;
 }
 
-// OPEN -> PAID: records that the invoice was paid. This is a manual/
-// administrative marking for Day 5; Day 6 wires it to an actual payment
-// gateway charge outcome instead of a direct API call.
-export function markInvoicePaid(organizationId: string, invoiceId: string) {
-  return transitionInvoice(organizationId, invoiceId, 'PAID', { paidAt: new Date() });
+// OPEN -> PAID: records that the invoice was paid, whether by Day 6's
+// gateway charge or by an administrative marking.
+export async function markInvoicePaid(organizationId: string, invoiceId: string) {
+  const invoice = await transitionInvoice(organizationId, invoiceId, 'PAID', { paidAt: new Date() });
+  await webhookService.emitEvent(organizationId, 'invoice.paid', invoiceEventData(invoice));
+  return invoice;
 }
 
 // DRAFT|OPEN -> VOID: cancels an invoice that should never be collected
 // (generated in error, or superseded). Terminal, like PAID.
-export function voidInvoice(organizationId: string, invoiceId: string) {
-  return transitionInvoice(organizationId, invoiceId, 'VOID', { voidedAt: new Date() });
+export async function voidInvoice(organizationId: string, invoiceId: string) {
+  const invoice = await transitionInvoice(organizationId, invoiceId, 'VOID', { voidedAt: new Date() });
+  await webhookService.emitEvent(organizationId, 'invoice.voided', invoiceEventData(invoice));
+  return invoice;
 }

@@ -3,8 +3,11 @@ import { prisma } from '../lib/prisma';
 import { detectCardBrand, isCardExpired, lastFour } from '../domain/card';
 import { isRetriableFailureCode, MockPaymentGateway, type ChargeResult, type PaymentGateway } from '../lib/paymentGateway';
 import { retryWithBackoff } from '../lib/retry';
+import { logger } from '../lib/logger';
 import * as customerService from './customer.service';
+import * as dunningService from './dunning.service';
 import * as invoiceService from './invoice.service';
+import * as webhookService from './webhook.service';
 import type { CreatePaymentMethodInput, ListPaymentMethodsQuery } from '../validators/paymentMethod';
 import type { ChargeInvoiceInput } from '../validators/payment';
 
@@ -82,7 +85,10 @@ export async function getPaymentMethod(organizationId: string, paymentMethodId: 
 // succeed, and if not, is it worth trying again"). On success, transitions
 // the invoice OPEN -> PAID; on failure, the invoice is left OPEN so it can
 // be retried later (e.g. by Day 8's dunning flow) or charged with a
-// different payment method.
+// different payment method — and a failure is what opens (or advances) the
+// invoice's dunning campaign in src/services/dunning.service.ts, so a
+// declined charge is automatically retried on the Day 8 schedule instead of
+// needing anyone to notice.
 export async function chargeInvoice(
   organizationId: string,
   invoiceId: string,
@@ -132,6 +138,35 @@ export async function chargeInvoice(
 
   if (outcome.status === 'succeeded') {
     await invoiceService.markInvoicePaid(organizationId, invoice.id);
+    await webhookService.emitEvent(organizationId, 'payment.succeeded', {
+      paymentId: payment.id,
+      invoiceId: invoice.id,
+      customerId: invoice.customerId,
+      amount: payment.amount,
+      currency: payment.currency,
+    });
+  } else {
+    await webhookService.emitEvent(organizationId, 'payment.failed', {
+      paymentId: payment.id,
+      invoiceId: invoice.id,
+      customerId: invoice.customerId,
+      amount: payment.amount,
+      currency: payment.currency,
+      failureCode: payment.failureCode,
+      attemptNumber: payment.attemptNumber,
+    });
+
+    // Opening the campaign must never turn a recorded decline into a failed
+    // request: the Payment row is already written and is what the caller
+    // asked for. A campaign that couldn't be opened is logged and picked up
+    // by the next failed charge.
+    try {
+      await dunningService.startDunning(organizationId, invoice.id, {
+        failureCode: payment.failureCode,
+      });
+    } catch (err) {
+      logger.error({ err, invoiceId: invoice.id }, 'Failed to start dunning for a declined invoice');
+    }
   }
 
   return payment;
