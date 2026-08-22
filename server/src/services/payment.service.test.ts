@@ -1,6 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { prisma } from '../lib/prisma';
 import type { ChargeRequest, ChargeResult, PaymentGateway } from '../lib/paymentGateway';
+import { createCoupon, redeemCoupon } from './coupon.service';
 import { createCustomer } from './customer.service';
 import { finalizeInvoice, generateInvoice, getInvoice } from './invoice.service';
 import { createPlan } from './plan.service';
@@ -9,6 +10,8 @@ import { createSubscription } from './subscription.service';
 import { addPaymentMethod, chargeInvoice, getPaymentMethod, listPaymentMethods, listPaymentsForInvoice } from './payment.service';
 
 async function resetDb() {
+  await prisma.couponRedemption.deleteMany();
+  await prisma.coupon.deleteMany();
   await prisma.payment.deleteMany();
   await prisma.paymentMethod.deleteMany();
   await prisma.invoiceLineItem.deleteMany();
@@ -341,5 +344,115 @@ describe('listPaymentsForInvoice', () => {
     const invoiceB = await makeOpenInvoice(orgB.id, customerB.id, 2900);
 
     await expect(listPaymentsForInvoice(orgA.id, invoiceB.id)).rejects.toMatchObject({ status: 404 });
+  });
+});
+
+describe('chargeInvoice with nothing left to collect', () => {
+  // A gateway that fails loudly if it is ever reached, so these tests prove
+  // the zero-value charge is never sent rather than merely tolerated.
+  const unreachableGateway: PaymentGateway = {
+    charge(_request: ChargeRequest): Promise<ChargeResult> {
+      throw new Error('the gateway should not be called for a zero-total invoice');
+    },
+  };
+
+  async function makeFullyDiscountedInvoice(organizationId: string, customerId: string) {
+    const product = await createProduct(organizationId, { name: 'Pro product' });
+    const plan = await createPlan(organizationId, {
+      productId: product.id,
+      name: 'Pro Monthly',
+      pricingModel: 'FLAT',
+      interval: 'MONTH',
+      currency: 'usd',
+      flatAmount: 2900,
+    });
+    const subscription = await createSubscription(organizationId, { customerId, planId: plan.id });
+    await createCoupon(organizationId, {
+      code: 'ONTHEHOUSE',
+      type: 'PERCENT_OFF',
+      percentOff: 100,
+      duration: 'FOREVER',
+    });
+    await redeemCoupon(organizationId, subscription.id, { code: 'ONTHEHOUSE' });
+    const invoice = await generateInvoice(organizationId, { subscriptionId: subscription.id });
+    return finalizeInvoice(organizationId, invoice.id);
+  }
+
+  it('settles a fully discounted invoice without calling the gateway', async () => {
+    const org = await makeOrg('Acme');
+    const customer = await createCustomer(org.id, { name: 'Jane Doe', email: 'jane@example.com' });
+    const invoice = await makeFullyDiscountedInvoice(org.id, customer.id);
+    const paymentMethod = await addPaymentMethod(org.id, {
+      customerId: customer.id,
+      cardNumber: CARD.succeeds,
+      expMonth: 12,
+      expYear: 2030,
+    });
+
+    expect(invoice.total).toBe(0);
+
+    const payment = await chargeInvoice(
+      org.id,
+      invoice.id,
+      { paymentMethodId: paymentMethod.id },
+      unreachableGateway,
+    );
+
+    expect(payment.status).toBe('SUCCEEDED');
+    expect(payment.amount).toBe(0);
+    // No gateway attempt was made, which is what tells this apart from a
+    // real charge that happened to be for nothing.
+    expect(payment.attemptNumber).toBe(0);
+    expect((await getInvoice(org.id, invoice.id)).status).toBe('PAID');
+  });
+
+  it('settles even with a card that would otherwise decline', async () => {
+    const org = await makeOrg('Acme');
+    const customer = await createCustomer(org.id, { name: 'Jane Doe', email: 'jane@example.com' });
+    const invoice = await makeFullyDiscountedInvoice(org.id, customer.id);
+    const paymentMethod = await addPaymentMethod(org.id, {
+      customerId: customer.id,
+      cardNumber: CARD.hardDeclines,
+      expMonth: 12,
+      expYear: 2030,
+    });
+
+    const payment = await chargeInvoice(org.id, invoice.id, { paymentMethodId: paymentMethod.id });
+
+    expect(payment.status).toBe('SUCCEEDED');
+    expect((await getInvoice(org.id, invoice.id)).status).toBe('PAID');
+  });
+
+  it('opens no dunning campaign for an invoice that never failed', async () => {
+    const org = await makeOrg('Acme');
+    const customer = await createCustomer(org.id, { name: 'Jane Doe', email: 'jane@example.com' });
+    const invoice = await makeFullyDiscountedInvoice(org.id, customer.id);
+    const paymentMethod = await addPaymentMethod(org.id, {
+      customerId: customer.id,
+      cardNumber: CARD.succeeds,
+      expMonth: 12,
+      expYear: 2030,
+    });
+
+    await chargeInvoice(org.id, invoice.id, { paymentMethodId: paymentMethod.id }, unreachableGateway);
+
+    expect(await prisma.dunningCampaign.count({ where: { invoiceId: invoice.id } })).toBe(0);
+  });
+
+  it('still refuses a payment method belonging to a different customer', async () => {
+    const org = await makeOrg('Acme');
+    const customer = await createCustomer(org.id, { name: 'Jane Doe', email: 'jane@example.com' });
+    const other = await createCustomer(org.id, { name: 'John Roe', email: 'john@example.com' });
+    const invoice = await makeFullyDiscountedInvoice(org.id, customer.id);
+    const paymentMethod = await addPaymentMethod(org.id, {
+      customerId: other.id,
+      cardNumber: CARD.succeeds,
+      expMonth: 12,
+      expYear: 2030,
+    });
+
+    await expect(
+      chargeInvoice(org.id, invoice.id, { paymentMethodId: paymentMethod.id }, unreachableGateway),
+    ).rejects.toMatchObject({ status: 400 });
   });
 });
