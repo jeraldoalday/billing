@@ -105,6 +105,15 @@ export async function chargeInvoice(
     throw ApiError.badRequest('Payment method does not belong to the invoice customer');
   }
 
+  // An invoice with nothing left to collect — a 100%-off coupon (Day 9), or
+  // a period whose proration credits cancelled the plan charge out — is
+  // settled without touching the gateway. Processors reject zero-value
+  // authorizations, so sending one would leave a genuinely paid-up invoice
+  // OPEN and hand it to dunning to retry forever.
+  if (invoice.total <= 0) {
+    return settleWithoutCharge(organizationId, invoice, paymentMethod.id);
+  }
+
   let attemptsMade = 0;
   const outcome = await retryWithBackoff<ChargeResult>(
     async (attemptNumber) => {
@@ -168,6 +177,39 @@ export async function chargeInvoice(
       logger.error({ err, invoiceId: invoice.id }, 'Failed to start dunning for a declined invoice');
     }
   }
+
+  return payment;
+}
+
+// Records a zero-amount SUCCEEDED Payment and marks the invoice paid.
+// `attemptNumber` is 0 to say plainly that no gateway attempt was made,
+// which is what tells this apart from a real charge that happened to be for
+// nothing.
+async function settleWithoutCharge(
+  organizationId: string,
+  invoice: { id: string; customerId: string; total: number; currency: string },
+  paymentMethodId: string,
+) {
+  const payment = await prisma.payment.create({
+    data: {
+      organizationId,
+      invoiceId: invoice.id,
+      paymentMethodId,
+      amount: invoice.total,
+      currency: invoice.currency,
+      status: 'SUCCEEDED',
+      attemptNumber: 0,
+    },
+  });
+
+  await invoiceService.markInvoicePaid(organizationId, invoice.id);
+  await webhookService.emitEvent(organizationId, 'payment.succeeded', {
+    paymentId: payment.id,
+    invoiceId: invoice.id,
+    customerId: invoice.customerId,
+    amount: payment.amount,
+    currency: payment.currency,
+  });
 
   return payment;
 }
