@@ -21,6 +21,8 @@ export async function createCustomer(organizationId: string, input: CreateCustom
       email: input.email,
       active: input.active ?? true,
       country: input.country,
+      taxId: input.taxId,
+      taxExempt: input.taxExempt ?? false,
     },
   });
 }
@@ -65,6 +67,8 @@ export async function updateCustomer(organizationId: string, customerId: string,
       email: input.email,
       active: input.active,
       country: input.country,
+      taxId: input.taxId,
+      taxExempt: input.taxExempt,
     },
   });
 }
