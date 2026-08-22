@@ -36,6 +36,9 @@ model Organization {
   webhookEndpoints  WebhookEndpoint[]
   webhookDeliveries WebhookDelivery[]
 
+  coupons           Coupon[]
+  couponRedemptions CouponRedemption[]
+
   @@map("organizations")
 }
 
@@ -135,6 +138,14 @@ model Customer {
   // it wasn't required before Day 5; a customer with no country on file is
   // simply taxed at 0 (see src/domain/tax.ts).
   country        String?
+  // VAT/GST registration number. Its presence is what makes a customer a
+  // business rather than a consumer, which is what the EU reverse-charge
+  // rule in src/domain/tax.ts keys off.
+  taxId          String?
+  // Set for customers who have proven they owe no tax at all (charities,
+  // resellers with a valid exemption certificate). Overrides every other
+  // rule, including the country rate table.
+  taxExempt      Boolean      @default(false)
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
 
@@ -179,6 +190,7 @@ model Subscription {
   invoices         Invoice[]
   usageEvents      UsageEvent[]
   dunningCampaigns DunningCampaign[]
+  couponRedemptions CouponRedemption[]
 
   @@index([organizationId])
   @@index([customerId])
@@ -217,10 +229,15 @@ model SubscriptionEvent {
 /// (InvoiceStatus: DRAFT/OPEN/PAID/VOID) follows the state machine in
 /// src/domain/invoice.ts; SQLite has no native enum type, so it's a plain
 /// string constrained by Zod like the other status fields in this schema.
-/// `subtotal`/`taxAmount`/`total` are integer minor currency units, cached
-/// on the invoice (not recomputed from line items on every read) so a paid
-/// or voided invoice's amounts stay fixed even if later code changes how
-/// totals are derived.
+/// `subtotal`/`discountAmount`/`taxAmount`/`total` are integer minor
+/// currency units, cached on the invoice (not recomputed from line items on
+/// every read) so a paid or voided invoice's amounts stay fixed even if
+/// later code changes how totals are derived. They compose as
+/// `total = subtotal - discountAmount + taxAmount`: `subtotal` is the sum of
+/// the charge line items before any coupon, `discountAmount` is the positive
+/// amount a redeemed Coupon took off (also written as a negative DISCOUNT
+/// line item so it shows on the rendered invoice), and tax is charged on
+/// what's left after the discount, not on the pre-discount subtotal.
 model Invoice {
   id             String       @id @default(cuid())
   organizationId String
@@ -235,6 +252,7 @@ model Invoice {
   periodStart    DateTime
   periodEnd      DateTime
   subtotal       Int
+  discountAmount Int          @default(0)
   taxAmount      Int
   total          Int
   issuedAt       DateTime?
@@ -255,12 +273,14 @@ model Invoice {
 }
 
 /// One charge or credit on an Invoice. `type` (InvoiceLineItemType:
-/// PLAN/PRORATION) records where the amount came from: PLAN is the plan's
-/// recurring price for the period, PRORATION is a signed credit/charge
-/// carried over from a mid-period plan change (`subscriptionEventId` links
-/// back to the originating SubscriptionEvent so it's only ever invoiced
-/// once). `amount` is signed (minor currency units) — negative for a
-/// proration credit.
+/// PLAN/PRORATION/USAGE/DISCOUNT) records where the amount came from: PLAN
+/// is the plan's recurring price for the period, USAGE is metered
+/// consumption, PRORATION is a signed credit/charge carried over from a
+/// mid-period plan change (`subscriptionEventId` links back to the
+/// originating SubscriptionEvent so it's only ever invoiced once), and
+/// DISCOUNT is the coupon the subscription had redeemed at generation time.
+/// `amount` is signed (minor currency units) — negative for a proration
+/// credit or a discount.
 model InvoiceLineItem {
   id                  String             @id @default(cuid())
   invoiceId           String
@@ -484,4 +504,77 @@ model WebhookDelivery {
   @@index([endpointId])
   @@index([status, nextAttemptAt])
   @@map("webhook_deliveries")
+}
+
+/// A discount an Organization can hand out, redeemed against a
+/// Subscription and applied by src/services/invoice.service.ts every time it
+/// generates an invoice for that subscription. `type` (CouponType:
+/// PERCENT_OFF/AMOUNT_OFF) picks which of `percentOff` (whole percent,
+/// 1-100) and `amountOff` (minor currency units, with `currency` naming the
+/// unit) carries the value; `duration` (CouponDuration:
+/// ONCE/REPEATING/FOREVER) says how many billing periods a single
+/// redemption keeps applying for, with `durationInMonths` holding the count
+/// for REPEATING. SQLite has no native enum type, so all three are plain
+/// strings constrained by Zod — see src/domain/coupon.ts.
+///
+/// `timesRedeemed` counts redemptions ever created (it is never decremented
+/// when one is removed), because `maxRedemptions` caps how many customers
+/// may ever take the offer up — not how many hold it right now.
+model Coupon {
+  id               String       @id @default(cuid())
+  organizationId   String
+  organization     Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  code             String
+  name             String?
+  type             String
+  percentOff       Int?
+  amountOff        Int?
+  currency         String?
+  duration         String
+  durationInMonths Int?
+  maxRedemptions   Int?
+  timesRedeemed    Int          @default(0)
+  redeemBy         DateTime?
+  active           Boolean      @default(true)
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  redemptions CouponRedemption[]
+
+  @@unique([organizationId, code])
+  @@index([organizationId])
+  @@map("coupons")
+}
+
+/// One Coupon attached to one Subscription. `periodsApplied` counts the
+/// invoices this redemption has already discounted, which is what a
+/// ONCE/REPEATING duration is measured against; once the duration is spent
+/// the redemption moves to COMPLETED and stops discounting, while REMOVED
+/// marks one detached by hand before then. `status` (CouponRedemptionStatus:
+/// ACTIVE/COMPLETED/REMOVED) is a plain string like the other status fields
+/// in this schema.
+///
+/// A subscription may hold at most one ACTIVE redemption at a time (enforced
+/// in src/services/coupon.service.ts, not the schema, since SQLite has no
+/// partial unique index) — stacking discounts would make the order they
+/// apply in matter, and nothing in the API expresses that order.
+model CouponRedemption {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  couponId       String
+  coupon         Coupon       @relation(fields: [couponId], references: [id], onDelete: Cascade)
+  subscriptionId String
+  subscription   Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  status         String
+  periodsApplied Int          @default(0)
+  startedAt      DateTime     @default(now())
+  endedAt        DateTime?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([organizationId])
+  @@index([couponId])
+  @@index([subscriptionId, status])
+  @@map("coupon_redemptions")
 }
