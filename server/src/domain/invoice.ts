@@ -4,12 +4,13 @@
 // Zod schemas (z.enum) and anywhere else that needs the allowed set at
 // runtime. InvoiceLineItemType's USAGE covers metered consumption on a
 // USAGE/TIERED plan, aggregated from UsageEvent rows by
-// src/services/invoice.service.ts (Day 7).
+// src/services/invoice.service.ts (Day 7), and DISCOUNT is the coupon a
+// subscription had redeemed when the invoice was generated (Day 9).
 
 export const INVOICE_STATUSES = ['DRAFT', 'OPEN', 'PAID', 'VOID'] as const;
 export type InvoiceStatus = (typeof INVOICE_STATUSES)[number];
 
-export const INVOICE_LINE_ITEM_TYPES = ['PLAN', 'PRORATION', 'USAGE'] as const;
+export const INVOICE_LINE_ITEM_TYPES = ['PLAN', 'PRORATION', 'USAGE', 'DISCOUNT'] as const;
 export type InvoiceLineItemType = (typeof INVOICE_LINE_ITEM_TYPES)[number];
 
 // The invoice status state machine: DRAFT -> OPEN -> PAID | VOID. An invoice
@@ -36,6 +37,34 @@ export interface InvoiceLineItemAmount {
 // how the service assembles line items.
 export function sumLineItemAmounts(lineItems: readonly InvoiceLineItemAmount[]): number {
   return lineItems.reduce((sum, item) => sum + item.amount, 0);
+}
+
+export interface InvoiceAmountsInput {
+  /** Sum of the charge line items, before any coupon. */
+  subtotal: number;
+  /** Positive amount a coupon takes off (see src/domain/coupon.ts). */
+  discountAmount: number;
+  /** Tax on what's left after the discount (see src/domain/tax.ts). */
+  taxAmount: number;
+}
+
+export interface InvoiceAmounts extends InvoiceAmountsInput {
+  /** What the discount leaves behind, which is what tax is charged on. */
+  taxableAmount: number;
+  total: number;
+}
+
+// Composes the three cached amounts on an Invoice into the figure that gets
+// charged. Kept here, rather than inline in the service, so the order the
+// discount and the tax apply in is stated once: the coupon comes off first
+// and tax follows the discounted price, never the list price.
+export function composeInvoiceAmounts({
+  subtotal,
+  discountAmount,
+  taxAmount,
+}: InvoiceAmountsInput): InvoiceAmounts {
+  const taxableAmount = subtotal - discountAmount;
+  return { subtotal, discountAmount, taxAmount, taxableAmount, total: taxableAmount + taxAmount };
 }
 
 // Formats an Organization.invoiceSequence value into the customer-facing

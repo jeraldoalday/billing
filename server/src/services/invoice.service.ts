@@ -1,14 +1,22 @@
 import { ApiError } from '../middleware/errorHandler';
 import { prisma } from '../lib/prisma';
-import { calculateTax } from '../domain/tax';
+import { calculateCustomerTax } from '../domain/tax';
 import {
   canTransitionInvoiceStatus,
+  composeInvoiceAmounts,
   formatInvoiceNumber,
   sumLineItemAmounts,
   type InvoiceStatus,
 } from '../domain/invoice';
+import {
+  calculateDiscountAmount,
+  couponAppliesToPeriod,
+  couponMatchesCurrency,
+  describeCoupon,
+} from '../domain/coupon';
 import { periodAmountForProration } from '../domain/proration';
 import { calculateUsageAmount } from '../domain/usage';
+import * as couponService from './coupon.service';
 import * as dunningService from './dunning.service';
 import * as subscriptionService from './subscription.service';
 import * as usageService from './usage.service';
@@ -18,7 +26,7 @@ import type { GenerateInvoiceInput, ListInvoicesQuery } from '../validators/invo
 const WITH_LINE_ITEMS = { lineItems: true };
 
 interface DraftLineItem {
-  type: 'PLAN' | 'PRORATION' | 'USAGE';
+  type: 'PLAN' | 'PRORATION' | 'USAGE' | 'DISCOUNT';
   description: string;
   quantity: number;
   unitAmount: number;
@@ -182,8 +190,28 @@ export async function generateInvoice(organizationId: string, input: GenerateInv
   lineItems.push(...(await uninvoicedProrationLineItems(subscription.id)));
 
   const subtotal = sumLineItemAmounts(lineItems);
-  const taxAmount = calculateTax(subtotal, subscription.customer.country);
-  const total = subtotal + taxAmount;
+
+  // The coupon (if any) discounting this subscription right now. Its period
+  // is consumed inside the same transaction that writes the invoice below,
+  // so a discount is never handed out without being counted against the
+  // redemption's duration.
+  const redemption = await applicableRedemption(organizationId, subscription);
+  const discountAmount = redemption ? calculateDiscountAmount(redemption.coupon, subtotal) : 0;
+  if (redemption && discountAmount > 0) {
+    lineItems.push({
+      type: 'DISCOUNT',
+      description: `${redemption.coupon.code} (${describeCoupon(redemption.coupon)})`,
+      quantity: 1,
+      unitAmount: -discountAmount,
+      amount: -discountAmount,
+    });
+  }
+
+  const { taxAmount, total } = composeInvoiceAmounts({
+    subtotal,
+    discountAmount,
+    taxAmount: calculateCustomerTax(subtotal - discountAmount, subscription.customer).amount,
+  });
 
   const invoice = await prisma.$transaction(async (tx) => {
     const organization = await tx.organization.update({
@@ -191,7 +219,7 @@ export async function generateInvoice(organizationId: string, input: GenerateInv
       data: { invoiceSequence: { increment: 1 } },
     });
 
-    return tx.invoice.create({
+    const created = await tx.invoice.create({
       data: {
         organizationId,
         customerId: subscription.customerId,
@@ -202,17 +230,50 @@ export async function generateInvoice(organizationId: string, input: GenerateInv
         periodStart: subscription.currentPeriodStart,
         periodEnd: subscription.currentPeriodEnd,
         subtotal,
+        discountAmount,
         taxAmount,
         total,
         lineItems: { create: lineItems },
       },
       include: WITH_LINE_ITEMS,
     });
+
+    // A redemption that produced no discount (nothing to discount on a zero
+    // subtotal) hasn't been used up, so it keeps its remaining periods for
+    // the next invoice that actually charges something.
+    if (redemption && discountAmount > 0) {
+      await couponService.consumeRedemptionPeriod(tx, redemption);
+    }
+
+    return created;
   });
 
   await webhookService.emitEvent(organizationId, 'invoice.created', invoiceEventData(invoice));
 
   return invoice;
+}
+
+// The redemption to apply to the invoice being generated, or null. A
+// redemption whose duration is spent, or whose amount-off coupon is in a
+// different currency than the invoice, discounts nothing — the currency
+// can't change after redemption today, but plans can be repriced, and
+// silently converting between currencies would be worse than not
+// discounting.
+async function applicableRedemption(
+  organizationId: string,
+  subscription: { id: string; plan: { currency: string } },
+) {
+  const redemption = await couponService.getActiveRedemption(organizationId, subscription.id);
+  if (!redemption) {
+    return null;
+  }
+  if (!couponAppliesToPeriod(redemption.coupon, redemption.periodsApplied)) {
+    return null;
+  }
+  if (!couponMatchesCurrency(redemption.coupon, subscription.plan.currency)) {
+    return null;
+  }
+  return redemption;
 }
 
 // The shape every invoice.* event carries. Deliberately a summary rather
@@ -227,6 +288,7 @@ function invoiceEventData(invoice: {
   subscriptionId: string;
   currency: string;
   subtotal: number;
+  discountAmount: number;
   taxAmount: number;
   total: number;
 }) {
@@ -238,6 +300,7 @@ function invoiceEventData(invoice: {
     subscriptionId: invoice.subscriptionId,
     currency: invoice.currency,
     subtotal: invoice.subtotal,
+    discountAmount: invoice.discountAmount,
     taxAmount: invoice.taxAmount,
     total: invoice.total,
   };
