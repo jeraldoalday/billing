@@ -12,6 +12,7 @@ import { invoicesRouter } from './routes/invoices';
 import { paymentMethodsRouter } from './routes/paymentMethods';
 import { plansRouter } from './routes/plans';
 import { productsRouter } from './routes/products';
+import { reportsRouter } from './routes/reports';
 import { subscriptionsRouter } from './routes/subscriptions';
 import { usageEventsRouter } from './routes/usageEvents';
 import { webhookDeliveriesRouter } from './routes/webhookDeliveries';
@@ -36,6 +37,7 @@ export function createApp(): Express {
   app.use('/invoices', invoicesRouter);
   app.use('/payment-methods', paymentMethodsRouter);
   app.use('/usage-events', usageEventsRouter);
+  app.use('/reports', reportsRouter);
   app.use('/webhook-endpoints', webhookEndpointsRouter);
   app.use('/webhook-deliveries', webhookDeliveriesRouter);
 
