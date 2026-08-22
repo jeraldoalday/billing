@@ -1,6 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { prisma } from '../lib/prisma';
-import { createCustomer } from './customer.service';
+import { createCoupon, getActiveRedemption, redeemCoupon, removeRedemption } from './coupon.service';
+import { createCustomer, updateCustomer } from './customer.service';
 import { createPlan } from './plan.service';
 import { createProduct } from './product.service';
 import { changeSubscriptionPlan, createSubscription } from './subscription.service';
@@ -15,6 +16,8 @@ import {
 } from './invoice.service';
 
 async function resetDb() {
+  await prisma.couponRedemption.deleteMany();
+  await prisma.coupon.deleteMany();
   await prisma.usageEvent.deleteMany();
   await prisma.invoiceLineItem.deleteMany();
   await prisma.invoice.deleteMany();
@@ -611,5 +614,232 @@ describe('getInvoice', () => {
     const invoice = await generateInvoice(orgB.id, { subscriptionId: subscriptionB.id });
 
     await expect(getInvoice(orgA.id, invoice.id)).rejects.toMatchObject({ status: 404 });
+  });
+});
+
+describe('generateInvoice with coupons', () => {
+  async function makeDiscountedSubscription(
+    organizationId: string,
+    coupon: Parameters<typeof createCoupon>[1],
+    flatAmount = 10000,
+  ) {
+    const customer = await createCustomer(organizationId, {
+      name: 'Jane Doe',
+      email: `jane-${Math.random().toString(36).slice(2)}@example.com`,
+    });
+    const plan = await makeFlatPlan(organizationId, 'Pro', flatAmount);
+    const subscription = await createSubscription(organizationId, {
+      customerId: customer.id,
+      planId: plan.id,
+    });
+    await createCoupon(organizationId, coupon);
+    const redemption = await redeemCoupon(organizationId, subscription.id, { code: coupon.code });
+    return { customer, plan, subscription, redemption };
+  }
+
+  const foreverHalfOff = {
+    code: 'HALFOFF',
+    type: 'PERCENT_OFF' as const,
+    percentOff: 50,
+    duration: 'FOREVER' as const,
+  };
+
+  it('writes the discount as a line item and caches it on the invoice', async () => {
+    const org = await makeOrg('Acme');
+    const { subscription } = await makeDiscountedSubscription(org.id, foreverHalfOff);
+
+    const invoice = await generateInvoice(org.id, { subscriptionId: subscription.id });
+
+    expect(invoice.subtotal).toBe(10000);
+    expect(invoice.discountAmount).toBe(5000);
+    expect(invoice.total).toBe(5000);
+    const discountLine = invoice.lineItems.find((item) => item.type === 'DISCOUNT');
+    expect(discountLine?.amount).toBe(-5000);
+    expect(discountLine?.description).toContain('HALFOFF');
+  });
+
+  it('charges tax on the discounted amount, not the list price', async () => {
+    const org = await makeOrg('Acme');
+    const { customer, subscription } = await makeDiscountedSubscription(org.id, foreverHalfOff);
+    await updateCustomer(org.id, customer.id, { country: 'GB' });
+
+    const invoice = await generateInvoice(org.id, { subscriptionId: subscription.id });
+
+    // 20% of the discounted 5000, not of the 10000 subtotal.
+    expect(invoice.taxAmount).toBe(1000);
+    expect(invoice.total).toBe(6000);
+  });
+
+  it('takes a fixed amount off in the invoice currency', async () => {
+    const org = await makeOrg('Acme');
+    const { subscription } = await makeDiscountedSubscription(org.id, {
+      code: 'TWENTYOFF',
+      type: 'AMOUNT_OFF',
+      amountOff: 2000,
+      currency: 'usd',
+      duration: 'FOREVER',
+    });
+
+    const invoice = await generateInvoice(org.id, { subscriptionId: subscription.id });
+
+    expect(invoice.discountAmount).toBe(2000);
+    expect(invoice.total).toBe(8000);
+  });
+
+  it('never discounts below zero when the coupon exceeds the subtotal', async () => {
+    const org = await makeOrg('Acme');
+    const { subscription } = await makeDiscountedSubscription(
+      org.id,
+      { code: 'BIGOFF', type: 'AMOUNT_OFF', amountOff: 999999, currency: 'usd', duration: 'ONCE' },
+      2500,
+    );
+
+    const invoice = await generateInvoice(org.id, { subscriptionId: subscription.id });
+
+    expect(invoice.discountAmount).toBe(2500);
+    expect(invoice.total).toBe(0);
+  });
+
+  it('counts the period against the redemption when it discounts an invoice', async () => {
+    const org = await makeOrg('Acme');
+    const { subscription } = await makeDiscountedSubscription(org.id, foreverHalfOff);
+
+    await generateInvoice(org.id, { subscriptionId: subscription.id });
+
+    const redemption = await getActiveRedemption(org.id, subscription.id);
+    expect(redemption?.periodsApplied).toBe(1);
+    expect(redemption?.status).toBe('ACTIVE');
+  });
+
+  it('stops discounting once a once-only coupon has been used', async () => {
+    const org = await makeOrg('Acme');
+    const { subscription } = await makeDiscountedSubscription(org.id, {
+      code: 'FIRSTMONTH',
+      type: 'PERCENT_OFF',
+      percentOff: 100,
+      duration: 'ONCE',
+    });
+
+    const first = await generateInvoice(org.id, { subscriptionId: subscription.id });
+    expect(first.total).toBe(0);
+
+    // Move the subscription into its next period so a second invoice is
+    // allowed, the way the billing runner will.
+    await prisma.subscription.update({
+      where: { id: subscription.id },
+      data: {
+        currentPeriodStart: new Date('2026-09-01T00:00:00Z'),
+        currentPeriodEnd: new Date('2026-10-01T00:00:00Z'),
+      },
+    });
+
+    const second = await generateInvoice(org.id, { subscriptionId: subscription.id });
+
+    expect(second.discountAmount).toBe(0);
+    expect(second.total).toBe(10000);
+    expect(second.lineItems.some((item) => item.type === 'DISCOUNT')).toBe(false);
+  });
+
+  it('stops discounting once a coupon is removed from the subscription', async () => {
+    const org = await makeOrg('Acme');
+    const { subscription } = await makeDiscountedSubscription(org.id, foreverHalfOff);
+    await removeRedemption(org.id, subscription.id);
+
+    const invoice = await generateInvoice(org.id, { subscriptionId: subscription.id });
+
+    expect(invoice.discountAmount).toBe(0);
+    expect(invoice.total).toBe(10000);
+  });
+
+  it('does not spend a redemption period on an invoice with nothing to discount', async () => {
+    const org = await makeOrg('Acme');
+    const customer = await createCustomer(org.id, { name: 'Metered', email: 'metered@example.com' });
+    const plan = await makeUsagePlan(org.id, 'Metered');
+    const subscription = await createSubscription(org.id, { customerId: customer.id, planId: plan.id });
+    await createCoupon(org.id, { ...foreverHalfOff, duration: 'ONCE' });
+    await redeemCoupon(org.id, subscription.id, { code: 'HALFOFF' });
+
+    const invoice = await generateInvoice(org.id, { subscriptionId: subscription.id });
+
+    expect(invoice.subtotal).toBe(0);
+    expect(invoice.discountAmount).toBe(0);
+    expect((await getActiveRedemption(org.id, subscription.id))?.periodsApplied).toBe(0);
+  });
+
+  it('leaves the invoice undiscounted when the plan currency no longer matches the coupon', async () => {
+    const org = await makeOrg('Acme');
+    const { plan, subscription } = await makeDiscountedSubscription(org.id, {
+      code: 'USDOFF',
+      type: 'AMOUNT_OFF',
+      amountOff: 1000,
+      currency: 'usd',
+      duration: 'FOREVER',
+    });
+    // Repricing the plan in another currency after the coupon was redeemed.
+    await prisma.plan.update({ where: { id: plan.id }, data: { currency: 'eur' } });
+
+    const invoice = await generateInvoice(org.id, { subscriptionId: subscription.id });
+
+    expect(invoice.discountAmount).toBe(0);
+    expect(invoice.total).toBe(10000);
+  });
+});
+
+describe('generateInvoice tax treatment', () => {
+  async function makeSubscriptionForCustomer(
+    organizationId: string,
+    customerInput: Parameters<typeof createCustomer>[1],
+  ) {
+    const customer = await createCustomer(organizationId, customerInput);
+    const plan = await makeFlatPlan(organizationId, 'Pro', 10000);
+    const subscription = await createSubscription(organizationId, {
+      customerId: customer.id,
+      planId: plan.id,
+    });
+    return { customer, subscription };
+  }
+
+  it('taxes an ordinary customer at their country rate', async () => {
+    const org = await makeOrg('Acme');
+    const { subscription } = await makeSubscriptionForCustomer(org.id, {
+      name: 'Consumer',
+      email: 'consumer@example.de',
+      country: 'DE',
+    });
+
+    const invoice = await generateInvoice(org.id, { subscriptionId: subscription.id });
+
+    expect(invoice.taxAmount).toBe(1900);
+    expect(invoice.total).toBe(11900);
+  });
+
+  it('charges no tax to a customer with an exemption on file', async () => {
+    const org = await makeOrg('Acme');
+    const { subscription } = await makeSubscriptionForCustomer(org.id, {
+      name: 'Charity',
+      email: 'charity@example.de',
+      country: 'DE',
+      taxExempt: true,
+    });
+
+    const invoice = await generateInvoice(org.id, { subscriptionId: subscription.id });
+
+    expect(invoice.taxAmount).toBe(0);
+    expect(invoice.total).toBe(10000);
+  });
+
+  it('reverse-charges an EU business that supplied a VAT id', async () => {
+    const org = await makeOrg('Acme');
+    const { subscription } = await makeSubscriptionForCustomer(org.id, {
+      name: 'GmbH',
+      email: 'ap@example.de',
+      country: 'DE',
+      taxId: 'DE123456789',
+    });
+
+    const invoice = await generateInvoice(org.id, { subscriptionId: subscription.id });
+
+    expect(invoice.taxAmount).toBe(0);
+    expect(invoice.total).toBe(10000);
   });
 });

@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { canTransitionInvoiceStatus, formatInvoiceNumber, sumLineItemAmounts } from './invoice';
+import {
+  canTransitionInvoiceStatus,
+  composeInvoiceAmounts,
+  formatInvoiceNumber,
+  sumLineItemAmounts,
+} from './invoice';
 
 describe('canTransitionInvoiceStatus', () => {
   it('allows DRAFT to move to OPEN or VOID', () => {
@@ -60,5 +65,37 @@ describe('formatInvoiceNumber', () => {
   it('rejects a non-positive sequence', () => {
     expect(() => formatInvoiceNumber(0)).toThrow();
     expect(() => formatInvoiceNumber(-1)).toThrow();
+  });
+});
+
+describe('composeInvoiceAmounts', () => {
+  it('totals an undiscounted invoice as subtotal plus tax', () => {
+    expect(composeInvoiceAmounts({ subtotal: 10000, discountAmount: 0, taxAmount: 2000 })).toEqual({
+      subtotal: 10000,
+      discountAmount: 0,
+      taxAmount: 2000,
+      taxableAmount: 10000,
+      total: 12000,
+    });
+  });
+
+  it('takes the discount off before the tax is added', () => {
+    const amounts = composeInvoiceAmounts({ subtotal: 10000, discountAmount: 2500, taxAmount: 1500 });
+
+    expect(amounts.taxableAmount).toBe(7500);
+    expect(amounts.total).toBe(9000);
+  });
+
+  it('totals a fully discounted invoice at zero', () => {
+    const amounts = composeInvoiceAmounts({ subtotal: 4999, discountAmount: 4999, taxAmount: 0 });
+
+    expect(amounts.taxableAmount).toBe(0);
+    expect(amounts.total).toBe(0);
+  });
+
+  it('carries a credit through as a negative total', () => {
+    const amounts = composeInvoiceAmounts({ subtotal: -2000, discountAmount: 0, taxAmount: -400 });
+
+    expect(amounts.total).toBe(-2400);
   });
 });
