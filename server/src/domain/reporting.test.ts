@@ -3,11 +3,14 @@ import {
   calculateArpu,
   calculateChurnRate,
   calculateRetentionRate,
+  churnedBetween,
+  cohortForWindow,
   monthlyAmount,
   roundRate,
   statusContributesToMrr,
   subscriptionMrr,
   summarizeMrr,
+  wasLiveAt,
   type MrrSubscription,
 } from './reporting';
 
@@ -220,5 +223,110 @@ describe('roundRate', () => {
   it('keeps two decimal places', () => {
     expect(roundRate(12.3456)).toBe(12.35);
     expect(roundRate(100)).toBe(100);
+  });
+});
+
+describe('wasLiveAt', () => {
+  const created = new Date('2026-01-10T00:00:00Z');
+
+  it('is not live before it was created', () => {
+    expect(wasLiveAt({ createdAt: created, canceledAt: null }, new Date('2026-01-09T00:00:00Z'))).toBe(false);
+  });
+
+  it('is live from the moment it was created', () => {
+    expect(wasLiveAt({ createdAt: created, canceledAt: null }, created)).toBe(true);
+  });
+
+  it('is live at any later instant while it has not been canceled', () => {
+    expect(wasLiveAt({ createdAt: created, canceledAt: null }, new Date('2027-06-01T00:00:00Z'))).toBe(true);
+  });
+
+  it('is no longer live at the instant it was canceled', () => {
+    const canceledAt = new Date('2026-02-01T00:00:00Z');
+
+    expect(wasLiveAt({ createdAt: created, canceledAt }, canceledAt)).toBe(false);
+  });
+
+  it('is still live just before it was canceled', () => {
+    const canceledAt = new Date('2026-02-01T00:00:00Z');
+
+    expect(wasLiveAt({ createdAt: created, canceledAt }, new Date('2026-01-31T23:59:59Z'))).toBe(true);
+  });
+});
+
+describe('churnedBetween', () => {
+  const from = new Date('2026-02-01T00:00:00Z');
+  const to = new Date('2026-03-01T00:00:00Z');
+  const createdAt = new Date('2026-01-01T00:00:00Z');
+
+  it('counts a cancellation inside the window', () => {
+    expect(churnedBetween({ createdAt, canceledAt: new Date('2026-02-15T00:00:00Z') }, from, to)).toBe(true);
+  });
+
+  it('counts a cancellation exactly at the window start', () => {
+    expect(churnedBetween({ createdAt, canceledAt: from }, from, to)).toBe(true);
+  });
+
+  it('leaves a cancellation exactly at the window end to the next window', () => {
+    expect(churnedBetween({ createdAt, canceledAt: to }, from, to)).toBe(false);
+  });
+
+  it('ignores a subscription that never ended', () => {
+    expect(churnedBetween({ createdAt, canceledAt: null }, from, to)).toBe(false);
+  });
+});
+
+describe('cohortForWindow', () => {
+  const from = new Date('2026-02-01T00:00:00Z');
+  const to = new Date('2026-03-01T00:00:00Z');
+
+  it('counts only what was live when the window opened', () => {
+    const cohort = cohortForWindow(
+      [
+        { createdAt: new Date('2026-01-01T00:00:00Z'), canceledAt: null },
+        { createdAt: new Date('2026-02-10T00:00:00Z'), canceledAt: null },
+      ],
+      from,
+      to,
+    );
+
+    expect(cohort.atStart).toHaveLength(1);
+  });
+
+  it('excludes a subscription that both started and ended inside the window', () => {
+    const cohort = cohortForWindow(
+      [{ createdAt: new Date('2026-02-05T00:00:00Z'), canceledAt: new Date('2026-02-20T00:00:00Z') }],
+      from,
+      to,
+    );
+
+    expect(cohort.atStart).toHaveLength(0);
+    expect(cohort.churned).toHaveLength(0);
+  });
+
+  it('counts a starting subscription that left during the window', () => {
+    const cohort = cohortForWindow(
+      [
+        { createdAt: new Date('2026-01-01T00:00:00Z'), canceledAt: new Date('2026-02-20T00:00:00Z') },
+        { createdAt: new Date('2026-01-01T00:00:00Z'), canceledAt: null },
+      ],
+      from,
+      to,
+    );
+
+    expect(cohort.atStart).toHaveLength(2);
+    expect(cohort.churned).toHaveLength(1);
+    expect(calculateChurnRate({ atStart: cohort.atStart.length, churned: cohort.churned.length })).toBe(50);
+  });
+
+  it('ignores a cancellation that happened after the window closed', () => {
+    const cohort = cohortForWindow(
+      [{ createdAt: new Date('2026-01-01T00:00:00Z'), canceledAt: new Date('2026-04-01T00:00:00Z') }],
+      from,
+      to,
+    );
+
+    expect(cohort.atStart).toHaveLength(1);
+    expect(cohort.churned).toHaveLength(0);
   });
 });

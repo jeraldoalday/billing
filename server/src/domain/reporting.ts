@@ -175,3 +175,46 @@ export function calculateArpu(mrr: number, accounts: number): number {
   }
   return Math.round(mrr / accounts);
 }
+
+export interface SubscriptionLifespan {
+  createdAt: Date;
+  canceledAt: Date | null;
+}
+
+// Whether a subscription was a live billing relationship at an instant.
+// `canceledAt` is the moment it stopped, so a subscription canceled exactly
+// at `at` was already gone by then — the same convention every period
+// boundary in this codebase uses (start inclusive, end exclusive), which is
+// what keeps a subscription from being counted in two adjacent windows.
+export function wasLiveAt(subscription: SubscriptionLifespan, at: Date): boolean {
+  if (subscription.createdAt.getTime() > at.getTime()) {
+    return false;
+  }
+  return subscription.canceledAt === null || subscription.canceledAt.getTime() > at.getTime();
+}
+
+// Whether a subscription ended inside [from, to).
+export function churnedBetween(subscription: SubscriptionLifespan, from: Date, to: Date): boolean {
+  const { canceledAt } = subscription;
+  if (canceledAt === null) {
+    return false;
+  }
+  return canceledAt.getTime() >= from.getTime() && canceledAt.getTime() < to.getTime();
+}
+
+// Splits a set of subscriptions into the cohort that was live when a window
+// opened and the part of that cohort which left before it closed. Anything
+// that both started and ended inside the window is in neither figure — see
+// calculateChurnRate for why the starting cohort is what churn is measured
+// against.
+export function cohortForWindow<T extends SubscriptionLifespan>(
+  subscriptions: readonly T[],
+  from: Date,
+  to: Date,
+): { atStart: T[]; churned: T[] } {
+  const atStart = subscriptions.filter((subscription) => wasLiveAt(subscription, from));
+  return {
+    atStart,
+    churned: atStart.filter((subscription) => churnedBetween(subscription, from, to)),
+  };
+}
