@@ -4,6 +4,7 @@ import { pinoHttp } from 'pino-http';
 import { logger } from './lib/logger';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler';
 import { authRouter } from './routes/auth';
+import { couponsRouter } from './routes/coupons';
 import { customersRouter } from './routes/customers';
 import { dunningRouter } from './routes/dunning';
 import { healthRouter } from './routes/health';
@@ -29,6 +30,7 @@ export function createApp(): Express {
   app.use('/products', productsRouter);
   app.use('/plans', plansRouter);
   app.use('/customers', customersRouter);
+  app.use('/coupons', couponsRouter);
   app.use('/subscriptions', subscriptionsRouter);
   app.use('/dunning', dunningRouter);
   app.use('/invoices', invoicesRouter);
