@@ -54,6 +54,21 @@ export async function addPaymentMethod(organizationId: string, input: CreatePaym
   });
 }
 
+// The card an automatic charge should use: the customer's default, or
+// their most recently added one if none is marked default (a customer who
+// added a card before defaults existed still deserves to be billed).
+// Shared by dunning retries (src/services/dunning.service.ts) and the
+// recurring billing runner (src/services/billing.service.ts), which have to
+// agree on what "the customer's card" means — a retry that charged a
+// different card than the run it is recovering would be a surprise on a
+// statement.
+export async function defaultPaymentMethodFor(organizationId: string, customerId: string) {
+  return prisma.paymentMethod.findFirst({
+    where: { organizationId, customerId },
+    orderBy: [{ isDefault: 'desc' }, { createdAt: 'desc' }],
+  });
+}
+
 export async function listPaymentMethods(organizationId: string, query: ListPaymentMethodsQuery) {
   return prisma.paymentMethod.findMany({
     where: { organizationId, customerId: query.customerId },

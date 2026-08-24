@@ -151,16 +151,6 @@ export async function startDunning(
   return campaign;
 }
 
-// The card a retry should be charged against: the customer's default, or
-// their most recently added one if none is marked default (a customer who
-// added a card before defaults existed still deserves a retry).
-async function paymentMethodForRetry(organizationId: string, customerId: string) {
-  return prisma.paymentMethod.findFirst({
-    where: { organizationId, customerId },
-    orderBy: [{ isDefault: 'desc' }, { createdAt: 'desc' }],
-  });
-}
-
 async function resolveCampaign(
   campaign: CampaignWithRelations,
   status: DunningStatus,
@@ -267,7 +257,10 @@ export async function runDunningAttempt(
     return { campaign, outcome: null };
   }
 
-  const paymentMethod = await paymentMethodForRetry(organizationId, campaign.subscription.customerId);
+  const paymentMethod = await paymentService.defaultPaymentMethodFor(
+    organizationId,
+    campaign.subscription.customerId,
+  );
 
   let outcome: DunningAttemptOutcome = 'SKIPPED';
   let failureCode: string | null = 'no_payment_method';
