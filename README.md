@@ -16,11 +16,14 @@ reporting (MRR/churn/ARPU).
 server/         Express API, domain logic, Prisma schema/migrations
   src/
     config/     Environment loading and validation
-    lib/        Shared infrastructure (Prisma client, logger)
-    middleware/ Express middleware (error handling, auth once added)
+    domain/     Pure rules: pricing, proration, tax, dunning, billing cycle
+    lib/        Shared infrastructure (Prisma client, logger, job queue)
+    middleware/ Express middleware (error handling, auth)
     routes/     HTTP route handlers
     services/   Domain/business logic
     utils/      Small stateless helpers
+    index.ts    HTTP server entry point
+    worker.ts   Background worker entry point
   prisma/       Schema and migrations
 web/            React frontend (added later in the roadmap)
 ```
@@ -35,6 +38,12 @@ npm run dev:server
 
 The server starts on `http://localhost:4000`. `GET /health` returns a basic liveness
 check.
+
+The background worker is a separate process (see **Background jobs** below):
+
+```bash
+npm run dev:worker
+```
 
 Run the server's tests:
 
@@ -152,6 +161,81 @@ charged. A few decisions worth knowing when reading the numbers:
 - MRR and ARPU are live snapshots with no `asOf`: reconstructing a past instant would
   need history this schema doesn't keep, and a figure that quietly answered a different
   question than it was asked would be worse than not offering one.
+
+## Background jobs
+
+Billing happens on its own, without anyone calling an endpoint. `server/src/worker.ts`
+is a second entry point beside the HTTP server, made of two deliberately separate
+halves: a **scheduler** that decides when each recurring sweep is due and does nothing
+but queue it, and an in-process **job queue** that runs the queued work under a
+concurrency limit with a retry budget. That split is what keeps a slow billing run from
+delaying the dunning schedule, and what lets a failed sweep retry on its own backoff
+instead of waiting a whole interval.
+
+```bash
+npm run dev:worker          # watch mode
+npm run worker --workspace server -- --once   # one pass, then exit (for cron)
+```
+
+| Job | Default interval | What it does |
+| --- | --- | --- |
+| `billing.cycle` | 15 minutes | Invoices and collects every subscription whose period has closed |
+| `dunning.sweep` | 15 minutes | Runs every failed-payment retry that has come due |
+| `webhook.retry` | 1 minute | Re-sends every webhook delivery whose retry has come due |
+
+Intervals, the poll resolution and the worker's concurrency are environment variables
+(`WORKER_BILLING_INTERVAL_MS`, `WORKER_TICK_MS`, `WORKER_CONCURRENCY`, ... — see
+`server/.env.example`). The queue is in-process on purpose: every job is a sweep over
+rows that are already durable, so a run lost with the process is re-derived by the next
+tick rather than being work that vanished. That does mean **one worker process** per
+database — two would each queue their own copy of every sweep. They could not
+double-bill (invoice generation refuses a second invoice for the same period, and a
+dunning campaign is unique per invoice), but they would do the work twice.
+
+Every execution is recorded as a `JobRun` row — payload, attempts, the summary the
+handler returned — which is what makes "did last night's billing run finish, and what
+did it charge" answerable after a restart.
+
+```
+GET  /jobs                    the run history (filter by name/status)
+GET  /jobs/:id                one run
+GET  /jobs/queue              what this process can run and what it is holding
+POST /jobs                    queue a sweep (202)
+POST /jobs/run                run this organization's due jobs now
+POST /jobs/billing-run        run a billing cycle synchronously and return the summary
+```
+
+### What a billing cycle does
+
+For each subscription that might have work due, the runner asks
+`server/src/domain/billingCycle.ts` what should happen and then does it:
+
+- **Renew** — the period has closed, so it is invoiced, finalized and charged, and the
+  subscription rolls into the next period. Billing is **in arrears**: an invoice covers
+  the period that has *finished*, which is the only way a metered plan's usage can be on
+  it. The next period's bounds come from the last period's end, never from the clock, so
+  a run that happens late never shifts a billing anniversary.
+- **End a trial** — the trial ran out, so the subscription starts paying from the
+  scheduled `trialEnd` (not from whenever the worker noticed). Nothing is invoiced: the
+  first paid period is billed when it ends, like every other period.
+- **Apply a scheduled cancellation** — a cancellation booked for period end has come
+  due. The final period is invoiced first, then the subscription stops; `cancelAt` keeps
+  the date the customer was told.
+- **Skip** — with a reason (`period_not_ended`, `trial_in_progress`, `awaiting_payment`,
+  `already_canceled`), so "nothing happened" is never silent.
+
+A declined charge is not an error: the payment is recorded, a dunning campaign opens,
+and the subscription goes `PAST_DUE`. The runner then leaves it alone —
+stacking a second invoice on a customer who hasn't paid the first would double what
+dunning is retrying. When dunning recovers the subscription, the next run bills every
+period that elapsed meanwhile, one invoice at a time. A customer with no card on file
+is treated the same way as a decline: the invoice stays open and goes into dunning
+rather than the debt sitting unnoticed. A period with nothing left to collect (a
+100%-off coupon, or proration credits that cancel the charge out) is settled directly,
+without the gateway.
+
+`POST /jobs/billing-run` accepts an `asOf`, so a cycle measured in months can be
+exercised — or previewed — without waiting months.
 
 ## Roadmap
 
