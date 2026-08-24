@@ -87,6 +87,12 @@ export interface JobQueueOptions {
 export interface RunDueOptions {
   now?: Date;
   limit?: number;
+  /**
+   * Narrows a sweep to a subset of the due work — what an org-scoped
+   * caller (POST /jobs/run) uses so triggering a sweep can never run
+   * another tenant's job.
+   */
+  filter?: (job: JobRecord) => boolean;
 }
 
 const DEFAULT_CONCURRENCY = 4;
@@ -202,7 +208,9 @@ export class InMemoryJobQueue {
   // given up on according to the domain policy.
   async runDue(options: RunDueOptions = {}): Promise<JobRecord[]> {
     const now = options.now ?? this.clock();
-    const due = this.dueJobs(now).slice(0, options.limit ?? Number.MAX_SAFE_INTEGER);
+    const due = this.dueJobs(now)
+      .filter(options.filter ?? (() => true))
+      .slice(0, options.limit ?? Number.MAX_SAFE_INTEGER);
     if (due.length === 0) {
       return [];
     }

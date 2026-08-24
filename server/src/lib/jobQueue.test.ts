@@ -129,6 +129,25 @@ describe('running due work', () => {
     expect(queue.counts()).toMatchObject({ PENDING: 1, SUCCEEDED: 2 });
   });
 
+  it('can be narrowed to a subset of the due work', async () => {
+    const queue = new InMemoryJobQueue({ clock: () => NOW });
+    const ran: string[] = [];
+    queue.register('billing.cycle', async (payload: { tenant: string }) => {
+      ran.push(payload.tenant);
+      return null;
+    });
+    queue.enqueue('billing.cycle', { tenant: 'acme' });
+    queue.enqueue('billing.cycle', { tenant: 'globex' });
+
+    await queue.runDue({
+      now: NOW,
+      filter: (job) => (job.payload as { tenant: string }).tenant === 'acme',
+    });
+
+    expect(ran).toEqual(['acme']);
+    expect(queue.counts()).toMatchObject({ PENDING: 1, SUCCEEDED: 1 });
+  });
+
   it('never runs more handlers at once than its concurrency allows', async () => {
     const queue = new InMemoryJobQueue({ clock: () => NOW, concurrency: 2 });
     let inFlight = 0;
