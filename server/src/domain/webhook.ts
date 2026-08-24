@@ -18,6 +18,7 @@ export const WEBHOOK_EVENT_TYPES = [
   'payment.failed',
   'subscription.created',
   'subscription.updated',
+  'subscription.renewed',
   'subscription.canceled',
   'dunning.started',
   'dunning.attempt_failed',
