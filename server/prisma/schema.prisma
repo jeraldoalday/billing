@@ -39,6 +39,8 @@ model Organization {
   coupons           Coupon[]
   couponRedemptions CouponRedemption[]
 
+  jobRuns JobRun[]
+
   @@map("organizations")
 }
 
@@ -577,4 +579,40 @@ model CouponRedemption {
   @@index([couponId])
   @@index([subscriptionId, status])
   @@map("coupon_redemptions")
+}
+
+/// One execution of a background job (see src/lib/jobQueue.ts). The queue
+/// itself is in-process and holds only a recent window of runs in memory;
+/// this table is the durable record of what the worker did, which is what
+/// makes "did last night's billing run finish, and what did it charge"
+/// answerable after a restart.
+///
+/// `payload` and `result` are JSON strings (SQLite has no JSON column):
+/// the payload is what the job was asked to do, the result is the summary
+/// the handler returned. `status` (JobStatus: PENDING/RUNNING/SUCCEEDED/
+/// FAILED) plus `runAt` drive the due-work query, exactly as
+/// WebhookDelivery's status/nextAttemptAt do — PENDING covers both "never
+/// started" and "failed with attempts left", and the retry schedule lives
+/// in src/domain/job.ts.
+model JobRun {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String
+  status         String
+  payload        String
+  attemptsMade   Int          @default(0)
+  maxAttempts    Int
+  runAt          DateTime
+  startedAt      DateTime?
+  finishedAt     DateTime?
+  result         String?
+  error          String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([organizationId])
+  @@index([organizationId, name])
+  @@index([status, runAt])
+  @@map("job_runs")
 }
