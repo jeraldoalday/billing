@@ -104,12 +104,26 @@ export async function getPaymentMethod(organizationId: string, paymentMethodId: 
 // invoice's dunning campaign in src/services/dunning.service.ts, so a
 // declined charge is automatically retried on the Day 8 schedule instead of
 // needing anyone to notice.
+export interface ChargeInvoiceOptions {
+  /** Injectable so tests can drive a deterministic outcome. */
+  gateway?: PaymentGateway;
+  /**
+   * The instant the charge is being made at. Threaded through to dunning so
+   * a run driven by an `asOf` (the recurring billing runner, the dunning
+   * sweep, an operator simulating a later date) opens its campaign on the
+   * schedule it is simulating rather than on the wall clock.
+   */
+  now?: Date;
+}
+
 export async function chargeInvoice(
   organizationId: string,
   invoiceId: string,
   input: ChargeInvoiceInput,
-  gateway: PaymentGateway = defaultGateway,
+  options: ChargeInvoiceOptions = {},
 ) {
+  const gateway = options.gateway ?? defaultGateway;
+  const now = options.now ?? new Date();
   const invoice = await invoiceService.getInvoice(organizationId, invoiceId);
   if (invoice.status !== 'OPEN') {
     throw ApiError.conflict(`Cannot charge an invoice with status ${invoice.status}`);
@@ -187,6 +201,7 @@ export async function chargeInvoice(
     try {
       await dunningService.startDunning(organizationId, invoice.id, {
         failureCode: payment.failureCode,
+        now,
       });
     } catch (err) {
       logger.error({ err, invoiceId: invoice.id }, 'Failed to start dunning for a declined invoice');

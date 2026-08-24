@@ -308,9 +308,12 @@ async function billClosingPeriod(
     };
   }
 
-  const payment = await paymentService.chargeInvoice(organizationId, invoice.id, {
-    paymentMethodId: paymentMethod.id,
-  });
+  const payment = await paymentService.chargeInvoice(
+    organizationId,
+    invoice.id,
+    { paymentMethodId: paymentMethod.id },
+    { now },
+  );
   const settled = await invoiceService.getInvoice(organizationId, invoice.id);
 
   return {

@@ -271,9 +271,12 @@ export async function runDunningAttempt(
     // a decline is an expected outcome here, not an error, so only genuinely
     // unexpected failures (e.g. the invoice changing status underneath us)
     // propagate.
-    const payment = await paymentService.chargeInvoice(organizationId, campaign.invoiceId, {
-      paymentMethodId: paymentMethod.id,
-    });
+    const payment = await paymentService.chargeInvoice(
+      organizationId,
+      campaign.invoiceId,
+      { paymentMethodId: paymentMethod.id },
+      { now },
+    );
     outcome = payment.status === 'SUCCEEDED' ? 'SUCCEEDED' : 'FAILED';
     failureCode = payment.failureCode;
     paymentId = payment.id;

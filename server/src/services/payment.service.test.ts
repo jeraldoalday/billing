@@ -231,6 +231,28 @@ describe('chargeInvoice', () => {
     expect(updatedInvoice.status).toBe('OPEN');
   });
 
+  it('opens the dunning campaign at the instant the charge was made for', async () => {
+    const org = await makeOrg('Acme');
+    const customer = await createCustomer(org.id, { name: 'Jane Doe', email: 'jane@example.com' });
+    const invoice = await makeOpenInvoice(org.id, customer.id, 2900);
+    const paymentMethod = await addPaymentMethod(org.id, {
+      customerId: customer.id,
+      cardNumber: CARD.hardDeclines,
+      expMonth: 12,
+      expYear: 2030,
+    });
+    const asOf = new Date('2027-03-01T00:00:00.000Z');
+
+    await chargeInvoice(org.id, invoice.id, { paymentMethodId: paymentMethod.id }, { now: asOf });
+
+    // A run simulating a later date (the recurring billing runner, a
+    // dunning sweep with an `asOf`) must schedule its retries relative to
+    // that date, not to the wall clock the process happens to be running on.
+    const campaign = await prisma.dunningCampaign.findFirstOrThrow({ where: { invoiceId: invoice.id } });
+    expect(campaign.startedAt.toISOString()).toBe('2027-03-01T00:00:00.000Z');
+    expect(campaign.nextAttemptAt?.toISOString()).toBe('2027-03-02T00:00:00.000Z');
+  });
+
   it('calls a custom gateway when injected, instead of the default mock', async () => {
     const org = await makeOrg('Acme');
     const customer = await createCustomer(org.id, { name: 'Jane Doe', email: 'jane@example.com' });
@@ -249,7 +271,7 @@ describe('chargeInvoice', () => {
       },
     };
 
-    const payment = await chargeInvoice(org.id, invoice.id, { paymentMethodId: paymentMethod.id }, stubGateway);
+    const payment = await chargeInvoice(org.id, invoice.id, { paymentMethodId: paymentMethod.id }, { gateway: stubGateway });
 
     expect(payment.status).toBe('FAILED');
     expect(payment.failureCode).toBe('insufficient_funds');
@@ -395,7 +417,7 @@ describe('chargeInvoice with nothing left to collect', () => {
       org.id,
       invoice.id,
       { paymentMethodId: paymentMethod.id },
-      unreachableGateway,
+      { gateway: unreachableGateway },
     );
 
     expect(payment.status).toBe('SUCCEEDED');
@@ -434,7 +456,7 @@ describe('chargeInvoice with nothing left to collect', () => {
       expYear: 2030,
     });
 
-    await chargeInvoice(org.id, invoice.id, { paymentMethodId: paymentMethod.id }, unreachableGateway);
+    await chargeInvoice(org.id, invoice.id, { paymentMethodId: paymentMethod.id }, { gateway: unreachableGateway });
 
     expect(await prisma.dunningCampaign.count({ where: { invoiceId: invoice.id } })).toBe(0);
   });
@@ -452,7 +474,7 @@ describe('chargeInvoice with nothing left to collect', () => {
     });
 
     await expect(
-      chargeInvoice(org.id, invoice.id, { paymentMethodId: paymentMethod.id }, unreachableGateway),
+      chargeInvoice(org.id, invoice.id, { paymentMethodId: paymentMethod.id }, { gateway: unreachableGateway }),
     ).rejects.toMatchObject({ status: 400 });
   });
 });
