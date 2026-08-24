@@ -1,4 +1,5 @@
 import { ApiError } from '../middleware/errorHandler';
+import { env } from '../config/env';
 import { logger } from '../lib/logger';
 import { prisma } from '../lib/prisma';
 import { InMemoryJobQueue, type JobEvent, type JobRecord } from '../lib/jobQueue';
@@ -97,6 +98,7 @@ let queue: InMemoryJobQueue | null = null;
 export function getJobQueue(): InMemoryJobQueue {
   if (!queue) {
     queue = new InMemoryJobQueue({
+      concurrency: env.WORKER_CONCURRENCY,
       onEvent: recordJobEvent,
       onError: (err, context) => logger.error({ err, ...context }, 'Background job error'),
     });
