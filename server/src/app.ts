@@ -9,6 +9,7 @@ import { customersRouter } from './routes/customers';
 import { dunningRouter } from './routes/dunning';
 import { healthRouter } from './routes/health';
 import { invoicesRouter } from './routes/invoices';
+import { jobsRouter } from './routes/jobs';
 import { paymentMethodsRouter } from './routes/paymentMethods';
 import { plansRouter } from './routes/plans';
 import { productsRouter } from './routes/products';
@@ -35,6 +36,7 @@ export function createApp(): Express {
   app.use('/subscriptions', subscriptionsRouter);
   app.use('/dunning', dunningRouter);
   app.use('/invoices', invoicesRouter);
+  app.use('/jobs', jobsRouter);
   app.use('/payment-methods', paymentMethodsRouter);
   app.use('/usage-events', usageEventsRouter);
   app.use('/reports', reportsRouter);
