@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 import { ApiError } from '../api/client';
 import { AppRoutes } from '../App';
-import { TEST_SESSION, renderApp, validationError } from '../test/renderApp';
+import { EMPTY_SUMMARY, TEST_SESSION, renderApp, validationError } from '../test/renderApp';
 
 const AUTH_OK = {
   token: 'tok_fresh',
@@ -48,7 +48,7 @@ describe('LoginPage', () => {
       route: '/login',
       responses: {
         'POST /auth/login': AUTH_OK,
-        'GET /reports/summary': {},
+        'GET /reports/summary': EMPTY_SUMMARY,
       },
     });
 
@@ -120,7 +120,7 @@ describe('LoginPage', () => {
       session: TEST_SESSION,
       responses: {
         'GET /auth/me': { user: TEST_SESSION.user, organization: TEST_SESSION.organization },
-        'GET /reports/summary': {},
+        'GET /reports/summary': EMPTY_SUMMARY,
       },
     });
 

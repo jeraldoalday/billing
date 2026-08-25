@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 import { ApiError } from '../api/client';
 import { AppRoutes } from '../App';
-import { TEST_SESSION, renderApp } from '../test/renderApp';
+import { EMPTY_SUMMARY, TEST_SESSION, renderApp } from '../test/renderApp';
 
 const ME_OK = { user: TEST_SESSION.user, organization: TEST_SESSION.organization };
 
@@ -33,7 +33,7 @@ describe('route guards', () => {
     renderApp(<AppRoutes />, {
       route: '/',
       session: TEST_SESSION,
-      responses: { 'GET /auth/me': ME_OK, 'GET /reports/summary': {} },
+      responses: { 'GET /auth/me': ME_OK, 'GET /reports/summary': EMPTY_SUMMARY },
     });
 
     expect(await screen.findByRole('navigation', { name: 'Main' })).toBeInTheDocument();
@@ -81,7 +81,7 @@ describe('route guards', () => {
     const { store } = renderApp(<AppRoutes />, {
       route: '/',
       session: TEST_SESSION,
-      responses: { 'GET /auth/me': ME_OK, 'GET /reports/summary': {} },
+      responses: { 'GET /auth/me': ME_OK, 'GET /reports/summary': EMPTY_SUMMARY },
     });
     await screen.findByRole('navigation', { name: 'Main' });
 

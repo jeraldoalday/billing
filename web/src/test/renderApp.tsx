@@ -39,6 +39,27 @@ export const TEST_SESSION: StoredSession = {
   organization: { id: 'org_1', name: 'Acme Inc', slug: 'acme-inc' },
 };
 
+/** A zero-state summary report, the shape GET /reports/summary returns. */
+export const EMPTY_SUMMARY = {
+  mrr: { mrr: 0, subscriptions: 0, customers: 0, arpu: 0, groupBy: 'plan', breakdown: [] },
+  churn: {
+    from: '2026-07-26T00:00:00.000Z',
+    to: '2026-08-25T00:00:00.000Z',
+    subscriptions: { atStart: 0, churned: 0, churnRate: 0, retentionRate: 1 },
+    customers: { atStart: 0, churned: 0, churnRate: 0 },
+  },
+  revenue: {
+    from: '2026-07-26T00:00:00.000Z',
+    to: '2026-08-25T00:00:00.000Z',
+    invoices: 0,
+    grossRevenue: 0,
+    discounts: 0,
+    tax: 0,
+    netRevenue: 0,
+    outstanding: 0,
+  },
+};
+
 export function renderApp(ui: ReactNode, options: RenderAppOptions = {}): RenderAppResult {
   const responses = options.responses ?? {};
   const requests: RecordedRequest[] = [];
@@ -59,6 +80,11 @@ export function renderApp(ui: ReactNode, options: RenderAppOptions = {}): Render
       });
 
       const canned = responses[`${method} ${url.pathname}`];
+      // A promise stands in for a request that is still in flight, which is
+      // how a test holds a page in its loading state.
+      if (canned instanceof Promise) {
+        return canned as Promise<Response>;
+      }
       if (canned instanceof ApiError) {
         return {
           ok: false,

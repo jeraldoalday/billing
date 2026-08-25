@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 import { ApiError } from '../api/client';
 import { AppRoutes } from '../App';
-import { TEST_SESSION, renderApp, validationError } from '../test/renderApp';
+import { EMPTY_SUMMARY, TEST_SESSION, renderApp, validationError } from '../test/renderApp';
 
 const AUTH_OK = {
   token: 'tok_new_org',
@@ -39,12 +39,12 @@ describe('SignupPage', () => {
   it('posts the new organization to /auth/signup', async () => {
     const { requests } = renderApp(<AppRoutes />, {
       route: '/signup',
-      responses: { 'POST /auth/signup': AUTH_OK, 'GET /reports/summary': {} },
+      responses: { 'POST /auth/signup': AUTH_OK, 'GET /reports/summary': EMPTY_SUMMARY },
     });
 
     await fillSignup({ name: 'Ada Lovelace' });
 
-    await waitFor(() => expect(requests).toHaveLength(1));
+    await waitFor(() => expect(requests.length).toBeGreaterThan(0));
     expect(requests[0]?.body).toEqual({
       organizationName: 'Acme Inc',
       name: 'Ada Lovelace',
@@ -57,19 +57,19 @@ describe('SignupPage', () => {
   it('omits the optional name rather than sending an empty string', async () => {
     const { requests } = renderApp(<AppRoutes />, {
       route: '/signup',
-      responses: { 'POST /auth/signup': AUTH_OK, 'GET /reports/summary': {} },
+      responses: { 'POST /auth/signup': AUTH_OK, 'GET /reports/summary': EMPTY_SUMMARY },
     });
 
     await fillSignup();
 
-    await waitFor(() => expect(requests).toHaveLength(1));
+    await waitFor(() => expect(requests.length).toBeGreaterThan(0));
     expect(requests[0]?.body).not.toHaveProperty('name');
   });
 
   it('signs the new organization in', async () => {
     const { store } = renderApp(<AppRoutes />, {
       route: '/signup',
-      responses: { 'POST /auth/signup': AUTH_OK, 'GET /reports/summary': {} },
+      responses: { 'POST /auth/signup': AUTH_OK, 'GET /reports/summary': EMPTY_SUMMARY },
     });
 
     await fillSignup();

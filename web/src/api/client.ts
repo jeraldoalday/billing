@@ -227,16 +227,19 @@ export class ApiClient {
 
   // --- Catalogue --------------------------------------------------------
 
-  listProducts(query?: { active?: boolean }): Promise<Product[]> {
-    return this.get<{ products: Product[] }>('/products', query).then((r) => r.products);
+  listProducts(query?: { active?: boolean }, signal?: AbortSignal): Promise<Product[]> {
+    return this.get<{ products: Product[] }>('/products', query, signal).then((r) => r.products);
   }
 
   createProduct(input: { name: string; description?: string }): Promise<Product> {
     return this.post<{ product: Product }>('/products', input).then((r) => r.product);
   }
 
-  listPlans(query?: { productId?: string; active?: boolean }): Promise<Plan[]> {
-    return this.get<{ plans: Plan[] }>('/plans', query).then((r) => r.plans);
+  listPlans(
+    query?: { productId?: string; active?: boolean },
+    signal?: AbortSignal,
+  ): Promise<Plan[]> {
+    return this.get<{ plans: Plan[] }>('/plans', query, signal).then((r) => r.plans);
   }
 
   getPlan(id: string): Promise<Plan> {
@@ -245,8 +248,13 @@ export class ApiClient {
 
   // --- Customers --------------------------------------------------------
 
-  listCustomers(query?: { active?: boolean; email?: string }): Promise<Customer[]> {
-    return this.get<{ customers: Customer[] }>('/customers', query).then((r) => r.customers);
+  listCustomers(
+    query?: { active?: boolean; email?: string },
+    signal?: AbortSignal,
+  ): Promise<Customer[]> {
+    return this.get<{ customers: Customer[] }>('/customers', query, signal).then(
+      (r) => r.customers,
+    );
   }
 
   getCustomer(id: string): Promise<Customer> {
@@ -265,11 +273,11 @@ export class ApiClient {
 
   // --- Subscriptions ----------------------------------------------------
 
-  listSubscriptions(query?: {
-    customerId?: string;
-    status?: SubscriptionStatus;
-  }): Promise<Subscription[]> {
-    return this.get<{ subscriptions: Subscription[] }>('/subscriptions', query).then(
+  listSubscriptions(
+    query?: { customerId?: string; status?: SubscriptionStatus },
+    signal?: AbortSignal,
+  ): Promise<Subscription[]> {
+    return this.get<{ subscriptions: Subscription[] }>('/subscriptions', query, signal).then(
       (r) => r.subscriptions,
     );
   }
@@ -302,12 +310,11 @@ export class ApiClient {
 
   // --- Invoices and payments -------------------------------------------
 
-  listInvoices(query?: {
-    customerId?: string;
-    subscriptionId?: string;
-    status?: string;
-  }): Promise<Invoice[]> {
-    return this.get<{ invoices: Invoice[] }>('/invoices', query).then((r) => r.invoices);
+  listInvoices(
+    query?: { customerId?: string; subscriptionId?: string; status?: string },
+    signal?: AbortSignal,
+  ): Promise<Invoice[]> {
+    return this.get<{ invoices: Invoice[] }>('/invoices', query, signal).then((r) => r.invoices);
   }
 
   getInvoice(id: string): Promise<Invoice> {
@@ -334,20 +341,32 @@ export class ApiClient {
 
   // --- Reporting --------------------------------------------------------
 
-  getMrrReport(query?: { groupBy?: 'plan' | 'interval' }): Promise<MrrReport> {
-    return this.get<MrrReport>('/reports/mrr', query);
+  getMrrReport(
+    query?: { groupBy?: 'plan' | 'interval' },
+    signal?: AbortSignal,
+  ): Promise<MrrReport> {
+    return this.get<MrrReport>('/reports/mrr', query, signal);
   }
 
-  getChurnReport(query?: { from?: string; to?: string }): Promise<ChurnReport> {
-    return this.get<ChurnReport>('/reports/churn', query);
+  getChurnReport(
+    query?: { from?: string; to?: string },
+    signal?: AbortSignal,
+  ): Promise<ChurnReport> {
+    return this.get<ChurnReport>('/reports/churn', query, signal);
   }
 
-  getRevenueReport(query?: { from?: string; to?: string }): Promise<RevenueReport> {
-    return this.get<RevenueReport>('/reports/revenue', query);
+  getRevenueReport(
+    query?: { from?: string; to?: string },
+    signal?: AbortSignal,
+  ): Promise<RevenueReport> {
+    return this.get<RevenueReport>('/reports/revenue', query, signal);
   }
 
-  getSummaryReport(query?: { from?: string; to?: string }): Promise<SummaryReport> {
-    return this.get<SummaryReport>('/reports/summary', query);
+  getSummaryReport(
+    query?: { from?: string; to?: string },
+    signal?: AbortSignal,
+  ): Promise<SummaryReport> {
+    return this.get<SummaryReport>('/reports/summary', query, signal);
   }
 }
 
