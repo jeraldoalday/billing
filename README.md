@@ -7,8 +7,8 @@ reporting (MRR/churn/ARPU).
 ## Stack
 
 - **Server**: Node.js, TypeScript, Express, Prisma (SQLite for local dev), Zod, Pino
-- **Web** (coming later): React, Vite, TypeScript, Tailwind
-- **Tests**: Vitest + Supertest
+- **Web**: React, Vite, TypeScript, Tailwind, React Router
+- **Tests**: Vitest + Supertest (server), Vitest + Testing Library (web)
 
 ## Project layout
 
@@ -25,7 +25,16 @@ server/         Express API, domain logic, Prisma schema/migrations
     index.ts    HTTP server entry point
     worker.ts   Background worker entry point
   prisma/       Schema and migrations
-web/            React frontend (added later in the roadmap)
+web/            React single-page app (the billing console)
+  src/
+    api/        Typed API client and the response types it returns
+    auth/       Auth context and where the session is stored
+    components/ Presentational building blocks (inputs, alerts, stat cards)
+    hooks/      Data-loading hooks
+    lib/        Display formatting (money, dates, statuses)
+    pages/      One component per screen
+    routes/     Route guards and the signed-in app shell
+    test/       Render harness shared by the component tests
 ```
 
 ## Getting started
@@ -50,6 +59,51 @@ Run the server's tests:
 ```bash
 npm run test:server
 ```
+
+### Frontend
+
+The web app is a separate workspace that talks to the API over HTTP.
+
+```bash
+cp web/.env.example web/.env
+npm run dev:web
+```
+
+It starts on `http://localhost:5173` and expects the API at the origin in
+`VITE_API_BASE_URL` (`http://localhost:4000` by default). The port is pinned, because
+that exact origin is what the API's CORS allowlist permits out of the box — see
+`CORS_ORIGINS` in `server/.env.example`. Deploying the console anywhere else means
+adding that origin to `CORS_ORIGINS`, or the browser will block every request.
+
+Run the web tests, or build the production bundle:
+
+```bash
+npm run test:web
+npm run build:web
+```
+
+## How the console talks to the API
+
+Everything the UI does goes through one `ApiClient` (`web/src/api/client.ts`), built
+once by `AuthProvider` and handed to pages through `useAuth()`. It is the only place
+that knows about the network:
+
+- **Authentication** is a bearer token, held in `localStorage` and attached to every
+  request. It is deliberately not a cookie: nothing the browser attaches on its own
+  can reach the API cross-origin, which takes CSRF off the table. The trade-off is the
+  usual one for token-in-JS clients — a script on this origin could read the token.
+- **Session validity** is re-established on every page load. A stored token only
+  proves that a login happened at some point, so `AuthProvider` calls `GET /auth/me`
+  before anything routes, and the route guards hold a spinner until it settles rather
+  than flashing a page or bouncing the user to `/login`.
+- **Expiry** is handled centrally. Any response with a 401, from any request anywhere
+  in the app, clears the stored session and returns the user to the login page.
+- **Errors** arrive as an `ApiError` carrying the server's own `code` and `message`,
+  plus `fieldErrors` unpacked from a Zod `VALIDATION_ERROR`, so a form can put the
+  server's complaint underneath the input that caused it instead of inventing its own
+  wording.
+- **Money** stays an integer count of minor units all the way to the point of display;
+  `web/src/lib/format.ts` is the only place it becomes a string.
 
 ## Dunning and webhooks
 
