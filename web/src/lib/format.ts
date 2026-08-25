@@ -19,12 +19,21 @@ export function formatMoney(minorUnits: number, currency = 'usd', locale = 'en-U
   return formatter.format(minorUnits / 10 ** digits);
 }
 
-/** A ratio (`0.0731`) as a percentage string (`7.31%`). */
-export function formatPercent(ratio: number, fractionDigits = 2): string {
-  if (!Number.isFinite(ratio)) {
+/**
+ * A rate the API has already expressed as a percentage — `14.29` becomes
+ * `14.29%`.
+ *
+ * The reporting endpoints return churn and retention on a 0–100 scale, not
+ * as a 0–1 ratio (see `calculateChurnRate` in
+ * `server/src/domain/reporting.ts`), so this deliberately does not scale
+ * its input. There is no ratio-taking counterpart precisely so that the two
+ * cannot be confused at a call site.
+ */
+export function formatRate(percent: number, fractionDigits = 2): string {
+  if (!Number.isFinite(percent)) {
     return '—';
   }
-  return `${(ratio * 100).toFixed(fractionDigits)}%`;
+  return `${percent.toFixed(fractionDigits)}%`;
 }
 
 /** An ISO timestamp as a short calendar date, e.g. `25 Aug 2026`. */

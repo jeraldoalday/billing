@@ -195,6 +195,12 @@ export interface MrrReport {
   breakdown: MrrBreakdownEntry[];
 }
 
+/**
+ * Churn over a window. Every rate here is a **percentage on a 0-100 scale**,
+ * not a 0-1 ratio — `churnRate: 14.29` means 14.29% — matching
+ * `calculateChurnRate` in `server/src/domain/reporting.ts`. Format them with
+ * `formatRate`, never by multiplying by 100.
+ */
 export interface ChurnReport {
   from: string;
   to: string;
@@ -202,6 +208,7 @@ export interface ChurnReport {
     atStart: number;
     churned: number;
     churnRate: number;
+    /** The complement of `churnRate`; the two add to exactly 100. */
     retentionRate: number;
   };
   customers: {

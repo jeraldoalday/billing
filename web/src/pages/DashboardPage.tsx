@@ -3,7 +3,7 @@ import { ErrorState } from '../components/ErrorState';
 import { Spinner } from '../components/Spinner';
 import { StatCard } from '../components/StatCard';
 import { useApiQuery } from '../hooks/useApiQuery';
-import { formatDate, formatMoney, formatPercent, pluralize } from '../lib/format';
+import { formatDate, formatMoney, formatRate, pluralize } from '../lib/format';
 
 /**
  * The signed-in landing page: the revenue picture from `GET /reports/summary`.
@@ -64,7 +64,7 @@ export function DashboardPage() {
         />
         <StatCard
           label="Subscription churn"
-          value={formatPercent(churn.subscriptions.churnRate)}
+          value={formatRate(churn.subscriptions.churnRate)}
           detail={`${churn.subscriptions.churned} of ${churn.subscriptions.atStart} lost`}
         />
         <StatCard

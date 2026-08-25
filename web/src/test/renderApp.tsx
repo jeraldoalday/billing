@@ -45,7 +45,7 @@ export const EMPTY_SUMMARY = {
   churn: {
     from: '2026-07-26T00:00:00.000Z',
     to: '2026-08-25T00:00:00.000Z',
-    subscriptions: { atStart: 0, churned: 0, churnRate: 0, retentionRate: 1 },
+    subscriptions: { atStart: 0, churned: 0, churnRate: 0, retentionRate: 100 },
     customers: { atStart: 0, churned: 0, churnRate: 0 },
   },
   revenue: {

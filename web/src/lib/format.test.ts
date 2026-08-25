@@ -3,7 +3,7 @@ import {
   daysUntil,
   formatDate,
   formatMoney,
-  formatPercent,
+  formatRate,
   humanizeStatus,
   initialsFor,
   pluralize,
@@ -33,20 +33,22 @@ describe('formatMoney', () => {
   });
 });
 
-describe('formatPercent', () => {
-  it('renders a ratio as a percentage', () => {
-    expect(formatPercent(0.0731)).toBe('7.31%');
-    expect(formatPercent(1)).toBe('100.00%');
+describe('formatRate', () => {
+  // The reporting endpoints return churn on a 0-100 scale, so the value
+  // must be printed as given rather than multiplied by 100 again.
+  it('renders a percentage the API already scaled', () => {
+    expect(formatRate(14.29)).toBe('14.29%');
+    expect(formatRate(100)).toBe('100.00%');
+    expect(formatRate(0)).toBe('0.00%');
   });
 
   it('honours the requested precision', () => {
-    expect(formatPercent(0.0731, 0)).toBe('7%');
+    expect(formatRate(7.31, 0)).toBe('7%');
   });
 
-  // A churn rate over an empty cohort divides by zero upstream.
-  it('renders a dash for a non-finite ratio', () => {
-    expect(formatPercent(Number.NaN)).toBe('—');
-    expect(formatPercent(Number.POSITIVE_INFINITY)).toBe('—');
+  it('renders a dash for a non-finite rate', () => {
+    expect(formatRate(Number.NaN)).toBe('—');
+    expect(formatRate(Number.POSITIVE_INFINITY)).toBe('—');
   });
 });
 

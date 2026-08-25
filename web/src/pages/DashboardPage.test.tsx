@@ -23,8 +23,8 @@ const SUMMARY: SummaryReport = {
   churn: {
     from: '2026-07-26T00:00:00.000Z',
     to: '2026-08-25T00:00:00.000Z',
-    subscriptions: { atStart: 14, churned: 2, churnRate: 0.1429, retentionRate: 0.8571 },
-    customers: { atStart: 11, churned: 1, churnRate: 0.0909 },
+    subscriptions: { atStart: 14, churned: 2, churnRate: 14.29, retentionRate: 85.71 },
+    customers: { atStart: 11, churned: 1, churnRate: 9.09 },
   },
   revenue: {
     from: '2026-07-26T00:00:00.000Z',
