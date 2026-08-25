@@ -1,7 +1,9 @@
 import express, { type Express } from 'express';
 import helmet from 'helmet';
 import { pinoHttp } from 'pino-http';
+import { env } from './config/env';
 import { logger } from './lib/logger';
+import { createCorsMiddleware, parseAllowedOrigins } from './middleware/cors';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler';
 import { authRouter } from './routes/auth';
 import { couponsRouter } from './routes/coupons';
@@ -24,6 +26,7 @@ export function createApp(): Express {
 
   app.disable('x-powered-by');
   app.use(helmet());
+  app.use(createCorsMiddleware({ allowedOrigins: parseAllowedOrigins(env.CORS_ORIGINS) }));
   app.use(express.json());
   app.use(pinoHttp({ logger }));
 

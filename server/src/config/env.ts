@@ -8,6 +8,13 @@ const envSchema = z.object({
   JWT_SECRET: z.string().min(16).default('dev-secret-change-me-in-production'),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
 
+  // Browser origins allowed to call the API, comma-separated (see
+  // src/middleware/cors.ts). Defaults to the Vite dev server in web/ so a
+  // fresh checkout works with no configuration; a deployment sets this to
+  // the real web origin. "*" allows any origin, which is only ever
+  // appropriate for a public, token-authenticated API.
+  CORS_ORIGINS: z.string().default('http://localhost:5173'),
+
   // Background worker (src/worker.ts). The defaults suit a single-process
   // deployment: sweeps often enough that a renewal or a retry is never more
   // than a few minutes late, rarely enough that an idle installation isn't
