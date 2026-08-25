@@ -19,3 +19,25 @@ describe('security headers', () => {
     expect(res.headers['x-powered-by']).toBeUndefined();
   });
 });
+
+describe('cross-origin access', () => {
+  const app = createApp();
+
+  it('allows the configured web origin', async () => {
+    const res = await request(app).get('/health').set('Origin', 'http://localhost:5173');
+
+    expect(res.status).toBe(200);
+    expect(res.headers['access-control-allow-origin']).toBe('http://localhost:5173');
+  });
+
+  it('answers the preflight the browser sends before a login', async () => {
+    const res = await request(app)
+      .options('/auth/login')
+      .set('Origin', 'http://localhost:5173')
+      .set('Access-Control-Request-Method', 'POST')
+      .set('Access-Control-Request-Headers', 'content-type');
+
+    expect(res.status).toBe(204);
+    expect(res.headers['access-control-allow-headers']).toContain('Content-Type');
+  });
+});
