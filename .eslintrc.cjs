@@ -21,4 +21,18 @@ module.exports = {
     '@typescript-eslint/no-explicit-any': 'warn',
     'no-console': 'off',
   },
+  overrides: [
+    {
+      // The web/ workspace is browser code: it needs the DOM globals and the
+      // JSX parser option, neither of which apply to the Node server.
+      files: ['web/**/*.ts', 'web/**/*.tsx'],
+      parserOptions: {
+        ecmaFeatures: { jsx: true },
+      },
+      env: {
+        browser: true,
+        node: false,
+      },
+    },
+  ],
 };

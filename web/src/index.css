@@ -1,0 +1,36 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  /* Inputs and buttons inherit the app font instead of the UA's default. */
+  input,
+  select,
+  textarea,
+  button {
+    font: inherit;
+  }
+}
+
+@layer components {
+  .field-label {
+    @apply mb-1.5 block text-sm font-medium text-slate-700;
+  }
+
+  .field-input {
+    @apply block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm
+      placeholder:text-slate-400 focus:border-brand-500 focus:outline-none focus:ring-2
+      focus:ring-brand-500/30 disabled:cursor-not-allowed disabled:bg-slate-100;
+  }
+
+  .field-input-invalid {
+    @apply border-red-400 focus:border-red-500 focus:ring-red-500/30;
+  }
+
+  .btn-primary {
+    @apply inline-flex w-full items-center justify-center rounded-lg bg-brand-600 px-4 py-2.5
+      text-sm font-semibold text-white shadow-sm transition hover:bg-brand-700
+      focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2
+      disabled:cursor-not-allowed disabled:opacity-60;
+  }
+}
