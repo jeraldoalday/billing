@@ -308,7 +308,7 @@ next — including for the automated daily build (see `AGENT.md`).
 - [x] Day 8: Dunning (failed-payment retry) and outbound webhooks
 - [x] Day 9: Coupons/discounts, refined tax rules, MRR/churn/ARPU reporting
 - [x] Day 10: Background jobs: job queue, worker, recurring billing runner
-- [ ] Day 11: Frontend: scaffold, auth pages
+- [x] Day 11: Frontend: scaffold, auth pages
 - [ ] Day 12: Frontend: dashboard, customers, plans UI
 - [ ] Day 13: Frontend: subscriptions, invoices, settings UI
 - [ ] Day 14: Integration tests, docs, polish
