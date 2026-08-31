@@ -31,7 +31,7 @@ web/            React single-page app (the billing console)
     auth/       Auth context and where the session is stored
     components/ Presentational building blocks (inputs, alerts, stat cards)
     hooks/      Data-loading hooks
-    lib/        Display formatting (money, dates, statuses)
+    lib/        Display formatting (money, dates, statuses) and form parsing
     pages/      One component per screen
     routes/     Route guards and the signed-in app shell
     test/       Render harness shared by the component tests
@@ -104,6 +104,41 @@ that knows about the network:
   wording.
 - **Money** stays an integer count of minor units all the way to the point of display;
   `web/src/lib/format.ts` is the only place it becomes a string.
+
+## What the console does
+
+Each screen is one component under `web/src/pages/`, backed by real API calls — there
+is no mock data anywhere in the app.
+
+- **Dashboard** (`/`) — MRR, ARPU, subscription churn, and net revenue from a single
+  `GET /reports/summary`, so the four figures are one consistent snapshot rather than
+  three reads taken at three slightly different instants. Below them, MRR broken down
+  by plan, what was collected in the window, and a **Needs attention** panel listing
+  the past-due subscriptions (`GET /subscriptions?status=PAST_DUE`), each linking
+  straight to the customer behind it.
+- **Customers** (`/customers`) — the list, with a status filter and a search box. The
+  filter is a server-side query because `active` is a real column; the search is
+  applied in the browser, because the API's `email` filter is an exact match and no
+  use for typing three letters of a name. New customers are created from a dialog.
+- **Customer detail** (`/customers/:id`) — who they are, what they pay to date and
+  still owe, their subscriptions, and their invoices. The three reads are separate
+  queries: a failure to load invoices should not blank out the panel that says whose
+  page this is. Editing sends only the fields that actually changed, with a cleared
+  country or tax id going out as an explicit `null` (omitting it would mean "leave it
+  alone").
+- **Plans** (`/plans`) — the catalogue, with each product's plans grouped underneath
+  it, including archived ones so nothing silently disappears. Plans can be created for
+  all three pricing models: flat, usage (a rate per metric), and tiered (a table of
+  bands, validated for ascending bounds and a single unbounded final band before the
+  request is sent). An existing plan can be renamed, archived, or restored — but never
+  repriced, because live subscriptions and invoices already reference its price. To
+  reprice, create a new plan and archive the old one.
+
+Two rules run through all of it. Amounts typed into a form become integer minor units
+through `parseMoneyInput` (`web/src/lib/forms.ts`), which counts digits rather than
+multiplying by 100, so no price is ever a cent off. And a write that fails keeps its
+dialog open with the server's per-field messages under the inputs that caused them,
+rather than closing and losing what was typed.
 
 ## Dunning and webhooks
 
@@ -309,7 +344,7 @@ next — including for the automated daily build (see `AGENT.md`).
 - [x] Day 9: Coupons/discounts, refined tax rules, MRR/churn/ARPU reporting
 - [x] Day 10: Background jobs: job queue, worker, recurring billing runner
 - [x] Day 11: Frontend: scaffold, auth pages
-- [ ] Day 12: Frontend: dashboard, customers, plans UI
+- [x] Day 12: Frontend: dashboard, customers, plans UI
 - [ ] Day 13: Frontend: subscriptions, invoices, settings UI
 - [ ] Day 14: Integration tests, docs, polish
 
