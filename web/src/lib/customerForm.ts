@@ -185,3 +185,34 @@ export function filterCustomers(customers: Customer[], search: string): Customer
       customer.email.toLowerCase().includes(needle),
   );
 }
+
+/**
+ * The server's per-field messages, reduced to the one message per field a
+ * form can render.
+ *
+ * `ApiError.fieldErrors` is Zod's `flatten()` output — an array per field,
+ * keyed by whatever the schema calls it. Only the fields this form has an
+ * input for are kept, so a message about a field the user cannot see does
+ * not vanish into a component that has nowhere to put it.
+ */
+export function customerFieldErrorsFrom(
+  fieldErrors: Record<string, string[] | undefined>,
+): CustomerFieldErrors {
+  const keys: (keyof CustomerFormState)[] = [
+    'name',
+    'email',
+    'country',
+    'taxId',
+    'taxExempt',
+    'active',
+  ];
+
+  const errors: CustomerFieldErrors = {};
+  for (const key of keys) {
+    const message = fieldErrors[key]?.[0];
+    if (message) {
+      errors[key] = message;
+    }
+  }
+  return errors;
+}

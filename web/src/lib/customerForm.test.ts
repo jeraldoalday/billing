@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Customer } from '../api/types';
 import {
+  customerFieldErrorsFrom,
   customerFormFrom,
   emptyCustomerForm,
   filterCustomers,
@@ -188,5 +189,29 @@ describe('filterCustomers', () => {
 
   it('returns nothing when nothing matches', () => {
     expect(filterCustomers(customers, 'zzz')).toEqual([]);
+  });
+});
+
+describe('customerFieldErrorsFrom', () => {
+  it('takes the first message the server gave for each field', () => {
+    expect(
+      customerFieldErrorsFrom({
+        email: ['Invalid email', 'Also too long'],
+        name: ['String must contain at least 1 character(s)'],
+      }),
+    ).toEqual({
+      email: 'Invalid email',
+      name: 'String must contain at least 1 character(s)',
+    });
+  });
+
+  // A message about a field with no input on screen has nowhere to go; the
+  // form-level alert is what covers those.
+  it('ignores fields this form does not render', () => {
+    expect(customerFieldErrorsFrom({ organizationId: ['Not allowed'] })).toEqual({});
+  });
+
+  it('is empty when the failure named no fields', () => {
+    expect(customerFieldErrorsFrom({})).toEqual({});
   });
 });
