@@ -33,4 +33,29 @@
       focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2
       disabled:cursor-not-allowed disabled:opacity-60;
   }
+
+  .btn-action {
+    @apply inline-flex items-center justify-center rounded-lg bg-brand-600 px-3.5 py-2 text-sm
+      font-semibold text-white shadow-sm transition hover:bg-brand-700 focus:outline-none
+      focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 disabled:cursor-not-allowed
+      disabled:opacity-60;
+  }
+
+  .btn-secondary {
+    @apply inline-flex items-center justify-center rounded-lg border border-slate-300 bg-white
+      px-3.5 py-2 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-50
+      focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2
+      disabled:cursor-not-allowed disabled:opacity-60;
+  }
+
+  .btn-danger {
+    @apply inline-flex items-center justify-center rounded-lg border border-red-300 bg-white
+      px-3.5 py-2 text-sm font-medium text-red-700 shadow-sm transition hover:bg-red-50
+      focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2
+      disabled:cursor-not-allowed disabled:opacity-60;
+  }
+
+  .link {
+    @apply font-medium text-brand-700 hover:underline;
+  }
 }
