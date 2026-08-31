@@ -235,6 +235,85 @@ export interface SummaryReport {
   revenue: RevenueReport;
 }
 
+/**
+ * The bodies the write endpoints accept.
+ *
+ * These mirror the Zod schemas in `server/src/validators/`, so a form that
+ * typechecks here is one the server will not reject on shape. Amounts are
+ * integer minor units on the way in too — see `parseMoneyInput` in
+ * `src/lib/forms.ts`, which is what turns a typed `19.99` into `1999`.
+ */
+
+export interface CreateCustomerInput {
+  name: string;
+  email: string;
+  country?: string;
+  taxId?: string;
+  taxExempt?: boolean;
+}
+
+/**
+ * Every field is optional (the server requires at least one), and the two
+ * that can be cleared are nullable: a customer who deregisters for VAT has
+ * their `taxId` set to null rather than to an empty string.
+ */
+export interface UpdateCustomerInput {
+  name?: string;
+  email?: string;
+  active?: boolean;
+  country?: string | null;
+  taxId?: string | null;
+  taxExempt?: boolean;
+}
+
+export interface CreateProductInput {
+  name: string;
+  description?: string;
+}
+
+export interface UpdateProductInput {
+  name?: string;
+  description?: string | null;
+  active?: boolean;
+}
+
+export interface PriceTierInput {
+  /** Inclusive top of the band; `null` on the final, unbounded tier. */
+  upTo: number | null;
+  unitAmount: number;
+  flatFee?: number;
+}
+
+interface BasePlanInput {
+  productId: string;
+  name: string;
+  interval: BillingInterval;
+  currency?: string;
+  active?: boolean;
+}
+
+/**
+ * A discriminated union rather than one type with four nullable price
+ * fields, matching `createPlanSchema` on the server: a FLAT plan with a
+ * `usageMetric`, or a TIERED plan with no tiers, is not a thing that can be
+ * expressed here.
+ */
+export type CreatePlanInput =
+  | (BasePlanInput & { pricingModel: 'FLAT'; flatAmount: number })
+  | (BasePlanInput & { pricingModel: 'USAGE'; usageMetric: string; usageUnitAmount: number })
+  | (BasePlanInput & { pricingModel: 'TIERED'; usageMetric: string; tiers: PriceTierInput[] });
+
+/**
+ * What a plan update may touch. Pricing is deliberately absent: prices are
+ * immutable once created (see `updatePlanSchema` on the server), because
+ * subscriptions and invoices already reference them. Repricing means a new
+ * plan and archiving the old one.
+ */
+export interface UpdatePlanInput {
+  name?: string;
+  active?: boolean;
+}
+
 /** The error envelope every failing endpoint returns. */
 export interface ApiErrorBody {
   error: {

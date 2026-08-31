@@ -2,6 +2,9 @@ import type {
   ApiErrorBody,
   AuthResult,
   ChurnReport,
+  CreateCustomerInput,
+  CreatePlanInput,
+  CreateProductInput,
   Customer,
   Invoice,
   MrrReport,
@@ -14,6 +17,9 @@ import type {
   Subscription,
   SubscriptionStatus,
   SummaryReport,
+  UpdateCustomerInput,
+  UpdatePlanInput,
+  UpdateProductInput,
   ValidationErrorDetails,
 } from './types';
 
@@ -231,8 +237,16 @@ export class ApiClient {
     return this.get<{ products: Product[] }>('/products', query, signal).then((r) => r.products);
   }
 
-  createProduct(input: { name: string; description?: string }): Promise<Product> {
+  getProduct(id: string): Promise<Product> {
+    return this.get<{ product: Product }>(`/products/${id}`).then((r) => r.product);
+  }
+
+  createProduct(input: CreateProductInput): Promise<Product> {
     return this.post<{ product: Product }>('/products', input).then((r) => r.product);
+  }
+
+  updateProduct(id: string, input: UpdateProductInput): Promise<Product> {
+    return this.patch<{ product: Product }>(`/products/${id}`, input).then((r) => r.product);
   }
 
   listPlans(
@@ -244,6 +258,24 @@ export class ApiClient {
 
   getPlan(id: string): Promise<Plan> {
     return this.get<{ plan: Plan }>(`/plans/${id}`).then((r) => r.plan);
+  }
+
+  createPlan(input: CreatePlanInput): Promise<Plan> {
+    return this.post<{ plan: Plan }>('/plans', input).then((r) => r.plan);
+  }
+
+  /**
+   * Renames a plan or archives it. Pricing cannot be edited — the server
+   * rejects it, because live subscriptions already reference this plan's
+   * price. Repricing is a new plan plus `{ active: false }` on the old one.
+   */
+  updatePlan(id: string, input: UpdatePlanInput): Promise<Plan> {
+    return this.patch<{ plan: Plan }>(`/plans/${id}`, input).then((r) => r.plan);
+  }
+
+  /** Hard-deletes a plan; only possible while nothing subscribes to it. */
+  deletePlan(id: string): Promise<void> {
+    return this.delete<void>(`/plans/${id}`);
   }
 
   // --- Customers --------------------------------------------------------
@@ -261,14 +293,21 @@ export class ApiClient {
     return this.get<{ customer: Customer }>(`/customers/${id}`).then((r) => r.customer);
   }
 
-  createCustomer(input: {
-    name: string;
-    email: string;
-    country?: string;
-    taxId?: string;
-    taxExempt?: boolean;
-  }): Promise<Customer> {
+  createCustomer(input: CreateCustomerInput): Promise<Customer> {
     return this.post<{ customer: Customer }>('/customers', input).then((r) => r.customer);
+  }
+
+  updateCustomer(id: string, input: UpdateCustomerInput): Promise<Customer> {
+    return this.patch<{ customer: Customer }>(`/customers/${id}`, input).then((r) => r.customer);
+  }
+
+  /**
+   * Deletes a customer outright. The console prefers `updateCustomer(id,
+   * { active: false })` for anyone who has ever been billed, so their
+   * invoices keep pointing at a customer that still exists.
+   */
+  deleteCustomer(id: string): Promise<void> {
+    return this.delete<void>(`/customers/${id}`);
   }
 
   // --- Subscriptions ----------------------------------------------------
