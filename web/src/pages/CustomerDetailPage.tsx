@@ -106,7 +106,7 @@ export function CustomerDetailPage() {
         <StatCard
           label="Active subscriptions"
           value={String(activeSubscriptions)}
-          detail={pluralize(subscriptions.data?.length ?? 0, 'subscription')}
+          detail={`${pluralize(subscriptions.data?.length ?? 0, 'subscription')} in total`}
         />
         <StatCard
           label="Paid to date"
