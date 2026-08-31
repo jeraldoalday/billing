@@ -237,8 +237,10 @@ export class ApiClient {
     return this.get<{ products: Product[] }>('/products', query, signal).then((r) => r.products);
   }
 
-  getProduct(id: string): Promise<Product> {
-    return this.get<{ product: Product }>(`/products/${id}`).then((r) => r.product);
+  getProduct(id: string, signal?: AbortSignal): Promise<Product> {
+    return this.get<{ product: Product }>(`/products/${id}`, undefined, signal).then(
+      (r) => r.product,
+    );
   }
 
   createProduct(input: CreateProductInput): Promise<Product> {
@@ -256,8 +258,8 @@ export class ApiClient {
     return this.get<{ plans: Plan[] }>('/plans', query, signal).then((r) => r.plans);
   }
 
-  getPlan(id: string): Promise<Plan> {
-    return this.get<{ plan: Plan }>(`/plans/${id}`).then((r) => r.plan);
+  getPlan(id: string, signal?: AbortSignal): Promise<Plan> {
+    return this.get<{ plan: Plan }>(`/plans/${id}`, undefined, signal).then((r) => r.plan);
   }
 
   createPlan(input: CreatePlanInput): Promise<Plan> {
@@ -289,8 +291,10 @@ export class ApiClient {
     );
   }
 
-  getCustomer(id: string): Promise<Customer> {
-    return this.get<{ customer: Customer }>(`/customers/${id}`).then((r) => r.customer);
+  getCustomer(id: string, signal?: AbortSignal): Promise<Customer> {
+    return this.get<{ customer: Customer }>(`/customers/${id}`, undefined, signal).then(
+      (r) => r.customer,
+    );
   }
 
   createCustomer(input: CreateCustomerInput): Promise<Customer> {
@@ -321,8 +325,8 @@ export class ApiClient {
     );
   }
 
-  getSubscription(id: string): Promise<Subscription> {
-    return this.get<{ subscription: Subscription }>(`/subscriptions/${id}`).then(
+  getSubscription(id: string, signal?: AbortSignal): Promise<Subscription> {
+    return this.get<{ subscription: Subscription }>(`/subscriptions/${id}`, undefined, signal).then(
       (r) => r.subscription,
     );
   }
@@ -356,8 +360,10 @@ export class ApiClient {
     return this.get<{ invoices: Invoice[] }>('/invoices', query, signal).then((r) => r.invoices);
   }
 
-  getInvoice(id: string): Promise<Invoice> {
-    return this.get<{ invoice: Invoice }>(`/invoices/${id}`).then((r) => r.invoice);
+  getInvoice(id: string, signal?: AbortSignal): Promise<Invoice> {
+    return this.get<{ invoice: Invoice }>(`/invoices/${id}`, undefined, signal).then(
+      (r) => r.invoice,
+    );
   }
 
   finalizeInvoice(id: string): Promise<Invoice> {
