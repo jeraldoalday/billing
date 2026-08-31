@@ -18,6 +18,8 @@ export type Responses = Record<string, unknown>;
 export interface RecordedRequest {
   method: string;
   path: string;
+  /** The serialized query string, including the `?`, or '' when there is none. */
+  query: string;
   body: unknown;
   token: string | null;
 }
@@ -75,6 +77,7 @@ export function renderApp(ui: ReactNode, options: RenderAppOptions = {}): Render
       requests.push({
         method,
         path: url.pathname,
+        query: url.search,
         body: init?.body ? JSON.parse(String(init.body)) : undefined,
         token: clientOptions.getToken(),
       });
