@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   emptyPlanForm,
   emptyTierRow,
+  planFieldErrorsFrom,
   tierFieldKey,
   toCreatePlanInput,
   type PlanFormState,
@@ -189,5 +190,25 @@ describe('toCreatePlanInput, tiered plans', () => {
       ok: false,
       fieldErrors: { tiers: 'Add at least one tier' },
     });
+  });
+});
+
+describe('planFieldErrorsFrom', () => {
+  it('takes the first message per field', () => {
+    expect(
+      planFieldErrorsFrom({ flatAmount: ['Expected number', 'Must be positive'] }),
+    ).toEqual({ flatAmount: 'Expected number' });
+  });
+
+  // `tiers` names the table rather than any one input, and the form has a
+  // place to show it, so it is kept like every other key.
+  it('keeps a message about the tier table as a whole', () => {
+    expect(planFieldErrorsFrom({ tiers: ['At least one tier is required'] })).toEqual({
+      tiers: 'At least one tier is required',
+    });
+  });
+
+  it('ignores a field the server named with no message', () => {
+    expect(planFieldErrorsFrom({ name: [], currency: undefined })).toEqual({});
   });
 });
