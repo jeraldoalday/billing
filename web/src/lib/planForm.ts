@@ -189,3 +189,23 @@ export function toCreatePlanInput(state: PlanFormState): PlanFormResult {
   }
   return { ok: true, value: { ...base, pricingModel: 'TIERED', usageMetric: metric, tiers } };
 }
+
+/**
+ * The server's per-field messages reduced to one per field.
+ *
+ * Unlike the customer form, every key is kept: the plan form's fields are
+ * named exactly as the server's schema names them, and a message about
+ * `tiers` belongs on the tier table even though no single input owns it.
+ */
+export function planFieldErrorsFrom(
+  fieldErrors: Record<string, string[] | undefined>,
+): PlanFieldErrors {
+  const errors: PlanFieldErrors = {};
+  for (const [key, messages] of Object.entries(fieldErrors)) {
+    const message = messages?.[0];
+    if (message) {
+      errors[key] = message;
+    }
+  }
+  return errors;
+}

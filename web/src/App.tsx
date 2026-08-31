@@ -5,6 +5,7 @@ import { CustomersPage } from './pages/CustomersPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { LoginPage } from './pages/LoginPage';
 import { NotFoundPage } from './pages/NotFoundPage';
+import { PlansPage } from './pages/PlansPage';
 import { SignupPage } from './pages/SignupPage';
 import { AppLayout } from './routes/AppLayout';
 import { ProtectedRoute } from './routes/ProtectedRoute';
@@ -28,6 +29,7 @@ export function AppRoutes() {
           <Route path="/" element={<DashboardPage />} />
           <Route path="/customers" element={<CustomersPage />} />
           <Route path="/customers/:customerId" element={<CustomerDetailPage />} />
+          <Route path="/plans" element={<PlansPage />} />
           <Route path="*" element={<NotFoundPage />} />
         </Route>
       </Route>
