@@ -1,4 +1,8 @@
+import { Link } from 'react-router-dom';
+import type { Subscription } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
+import { Card, DataTable, type Column } from '../components/DataTable';
+import { EmptyState } from '../components/EmptyState';
 import { ErrorState } from '../components/ErrorState';
 import { Spinner } from '../components/Spinner';
 import { StatCard } from '../components/StatCard';
@@ -16,6 +20,13 @@ import { formatDate, formatMoney, formatRate, pluralize } from '../lib/format';
 export function DashboardPage() {
   const { api, organization } = useAuth();
   const summary = useApiQuery((signal) => api.getSummaryReport(undefined, signal), [api]);
+  // Loaded alongside the summary rather than derived from it: the report
+  // counts past-due subscriptions but does not say which ones they are,
+  // and the whole point of this panel is being able to click through.
+  const pastDue = useApiQuery(
+    (signal) => api.listSubscriptions({ status: 'PAST_DUE' }, signal),
+    [api],
+  );
 
   if (summary.isLoading) {
     return (
@@ -139,9 +150,62 @@ export function DashboardPage() {
           </dl>
         </section>
       </div>
+
+      <Card
+        title="Needs attention"
+        aside={
+          <Link className="link" to="/customers">
+            All customers
+          </Link>
+        }
+      >
+        {pastDue.isLoading ? (
+          <div className="px-4 py-8 text-center">
+            <Spinner label="Loading past-due subscriptions" />
+          </div>
+        ) : pastDue.error ? (
+          <ErrorState error={pastDue.error} onRetry={pastDue.refetch} />
+        ) : (
+          <DataTable
+            caption="Past-due subscriptions"
+            columns={PAST_DUE_COLUMNS}
+            rows={pastDue.data ?? []}
+            rowKey={(subscription) => subscription.id}
+            empty={
+              <EmptyState
+                title="Nothing is past due"
+                description="Every active subscription has paid its latest invoice."
+              />
+            }
+          />
+        )}
+      </Card>
     </div>
   );
 }
+
+/**
+ * A past-due subscription is only useful if you can get to the customer
+ * behind it, so the first column is a link rather than a name.
+ */
+const PAST_DUE_COLUMNS: Column<Subscription>[] = [
+  {
+    key: 'customer',
+    header: 'Customer',
+    render: (subscription) => (
+      <Link className="link" to={`/customers/${subscription.customerId}`}>
+        {subscription.customer?.name ?? 'View customer'}
+      </Link>
+    ),
+  },
+  { key: 'plan', header: 'Plan', render: (subscription) => subscription.plan?.name ?? '—' },
+  {
+    key: 'since',
+    header: 'Period ended',
+    align: 'right',
+    render: (subscription) => formatDate(subscription.currentPeriodEnd),
+  },
+];
 
 function RevenueRow({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
