@@ -287,3 +287,147 @@ describe('ApiClient.request', () => {
     expect(calls[0]?.[1]?.signal).toBe(controller.signal);
   });
 });
+
+describe('ApiClient catalogue and customer writes', () => {
+  function clientWith(body: unknown, init: { status?: number; text?: string } = {}) {
+    const { fetchImpl, calls } = respondWith(body, init);
+    return { client: new ApiClient({ baseUrl: BASE_URL, fetchImpl }), calls };
+  }
+
+  /** The JSON body a recorded call was made with. */
+  function bodyOf(calls: Array<[string, RequestInit | undefined]>, index = 0): unknown {
+    const raw = calls[index]?.[1]?.body;
+    return raw === undefined ? undefined : JSON.parse(String(raw));
+  }
+
+  it('creates a flat plan', async () => {
+    const { client, calls } = clientWith({ plan: { id: 'plan_1', name: 'Pro' } });
+
+    await expect(
+      client.createPlan({
+        productId: 'prod_1',
+        name: 'Pro',
+        interval: 'MONTH',
+        currency: 'usd',
+        pricingModel: 'FLAT',
+        flatAmount: 1999,
+      }),
+    ).resolves.toEqual({ id: 'plan_1', name: 'Pro' });
+
+    expect(calls[0]?.[0]).toBe('http://api.test/plans');
+    expect(calls[0]?.[1]?.method).toBe('POST');
+    expect(bodyOf(calls)).toMatchObject({ pricingModel: 'FLAT', flatAmount: 1999 });
+  });
+
+  it('creates a tiered plan with its tiers', async () => {
+    const { client, calls } = clientWith({ plan: { id: 'plan_2' } });
+
+    await client.createPlan({
+      productId: 'prod_1',
+      name: 'Metered',
+      interval: 'MONTH',
+      pricingModel: 'TIERED',
+      usageMetric: 'api_call',
+      tiers: [
+        { upTo: 1000, unitAmount: 5, flatFee: 0 },
+        { upTo: null, unitAmount: 3, flatFee: 0 },
+      ],
+    });
+
+    expect(bodyOf(calls)).toMatchObject({
+      pricingModel: 'TIERED',
+      usageMetric: 'api_call',
+      tiers: [
+        { upTo: 1000, unitAmount: 5 },
+        { upTo: null, unitAmount: 3 },
+      ],
+    });
+  });
+
+  it('archives a plan through a patch', async () => {
+    const { client, calls } = clientWith({ plan: { id: 'plan_1', active: false } });
+
+    await expect(client.updatePlan('plan_1', { active: false })).resolves.toEqual({
+      id: 'plan_1',
+      active: false,
+    });
+
+    expect(calls[0]?.[0]).toBe('http://api.test/plans/plan_1');
+    expect(calls[0]?.[1]?.method).toBe('PATCH');
+    expect(bodyOf(calls)).toEqual({ active: false });
+  });
+
+  // A delete answers 204 with no body at all, which must decode to
+  // undefined rather than throwing inside JSON.parse.
+  it('deletes a plan and tolerates the empty 204 body', async () => {
+    const { client, calls } = clientWith(undefined, { status: 204, text: '' });
+
+    await expect(client.deletePlan('plan_1')).resolves.toBeUndefined();
+    expect(calls[0]?.[1]?.method).toBe('DELETE');
+  });
+
+  it('filters plans by product and active state', async () => {
+    const { client, calls } = clientWith({ plans: [] });
+
+    await client.listPlans({ productId: 'prod_1', active: true });
+
+    expect(calls[0]?.[0]).toBe('http://api.test/plans?productId=prod_1&active=true');
+  });
+
+  it('reads and updates a product', async () => {
+    const { client, calls } = clientWith({ product: { id: 'prod_1', name: 'API access' } });
+
+    await expect(client.getProduct('prod_1')).resolves.toEqual({
+      id: 'prod_1',
+      name: 'API access',
+    });
+    expect(calls[0]?.[0]).toBe('http://api.test/products/prod_1');
+
+    await client.updateProduct('prod_1', { active: false });
+    expect(calls[1]?.[1]?.method).toBe('PATCH');
+    expect(bodyOf(calls, 1)).toEqual({ active: false });
+  });
+
+  it('updates a customer and unwraps the envelope', async () => {
+    const { client, calls } = clientWith({ customer: { id: 'cus_1', name: 'Ada' } });
+
+    await expect(client.updateCustomer('cus_1', { name: 'Ada' })).resolves.toEqual({
+      id: 'cus_1',
+      name: 'Ada',
+    });
+    expect(calls[0]?.[0]).toBe('http://api.test/customers/cus_1');
+  });
+
+  // Clearing a VAT id is a null, not an omitted field: leaving it out would
+  // mean "don't change it", which is the opposite of what was asked.
+  it('sends an explicit null to clear a nullable customer field', async () => {
+    const { client, calls } = clientWith({ customer: { id: 'cus_1' } });
+
+    await client.updateCustomer('cus_1', { taxId: null, country: null });
+
+    expect(bodyOf(calls)).toEqual({ taxId: null, country: null });
+  });
+
+  it('deletes a customer', async () => {
+    const { client, calls } = clientWith(undefined, { status: 204, text: '' });
+
+    await expect(client.deleteCustomer('cus_1')).resolves.toBeUndefined();
+    expect(calls[0]?.[0]).toBe('http://api.test/customers/cus_1');
+    expect(calls[0]?.[1]?.method).toBe('DELETE');
+  });
+
+  it('surfaces a duplicate email as a conflict', async () => {
+    const { client } = clientWith(
+      { error: { code: 'CONFLICT', message: 'A customer with this email already exists' } },
+      { status: 409 },
+    );
+
+    const error = (await client
+      .createCustomer({ name: 'Ada', email: 'ada@test.com' })
+      .catch((err: unknown) => err)) as ApiError;
+
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error.status).toBe(409);
+    expect(error.code).toBe('CONFLICT');
+  });
+});
