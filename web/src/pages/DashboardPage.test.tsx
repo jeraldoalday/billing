@@ -161,3 +161,70 @@ describe('DashboardPage', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('Could not reach the billing API');
   });
 });
+
+describe('DashboardPage, past-due subscriptions', () => {
+  const PAST_DUE = {
+    id: 'sub_9',
+    organizationId: 'org_1',
+    customerId: 'cus_9',
+    planId: 'plan_1',
+    status: 'PAST_DUE',
+    currentPeriodStart: '2026-07-01T00:00:00.000Z',
+    currentPeriodEnd: '2026-08-01T00:00:00.000Z',
+    trialEnd: null,
+    cancelAt: null,
+    canceledAt: null,
+    createdAt: '2026-06-01T00:00:00.000Z',
+    updatedAt: '2026-08-01T00:00:00.000Z',
+    customer: { id: 'cus_9', name: 'Grace Hopper' },
+    plan: { id: 'plan_1', name: 'Pro monthly' },
+  };
+
+  function renderWithPastDue(subscriptions: unknown) {
+    return renderApp(<AppRoutes />, {
+      route: '/',
+      session: TEST_SESSION,
+      responses: {
+        'GET /auth/me': ME_OK,
+        'GET /reports/summary': SUMMARY,
+        'GET /subscriptions': subscriptions,
+      },
+    });
+  }
+
+  it('asks the API only for the subscriptions that are past due', async () => {
+    const { requests } = renderWithPastDue({ subscriptions: [] });
+
+    await screen.findByRole('region', { name: 'Needs attention' });
+    const list = requests.filter((request) => request.path === '/subscriptions');
+    expect(list).toHaveLength(1);
+    expect(list[0]?.query).toBe('?status=PAST_DUE');
+  });
+
+  it('lists each past-due subscription with a link to its customer', async () => {
+    renderWithPastDue({ subscriptions: [PAST_DUE] });
+
+    const table = await screen.findByRole('table', { name: 'Past-due subscriptions' });
+    expect(within(table).getByRole('link', { name: 'Grace Hopper' })).toHaveAttribute(
+      'href',
+      '/customers/cus_9',
+    );
+    expect(within(table).getByText('Pro monthly')).toBeInTheDocument();
+  });
+
+  it('says so when nothing is past due', async () => {
+    renderWithPastDue({ subscriptions: [] });
+
+    expect(await screen.findByText('Nothing is past due')).toBeInTheDocument();
+  });
+
+  // The revenue figures above are still worth reading even if this one
+  // panel could not load, so its failure stays inside its own card.
+  it('keeps the rest of the dashboard when the panel fails to load', async () => {
+    renderWithPastDue(new ApiError(500, 'ERROR', 'Server error'));
+
+    const panel = await screen.findByRole('region', { name: 'Needs attention' });
+    expect(within(panel).getByText('Could not load this page')).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Key metrics' })).toBeInTheDocument();
+  });
+});
