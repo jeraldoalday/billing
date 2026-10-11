@@ -350,11 +350,23 @@ async function transitionInvoice(
     throw ApiError.conflict(`Cannot move an invoice from ${from} to ${to}`);
   }
 
-  return prisma.invoice.update({
-    where: { id: invoiceId },
+  // Conditioned on the status just read, so two requests racing to
+  // transition the same invoice (most importantly, two concurrent
+  // POST /invoices/:id/charge calls) can't both win: only the update that
+  // still finds the invoice in `from` applies, and the loser lands in the
+  // `count === 0` branch below instead of charging the gateway a second
+  // time for an invoice its own read already called OPEN.
+  const { count } = await prisma.invoice.updateMany({
+    where: { id: invoiceId, organizationId, status: from },
     data: { status: to, ...timestamp },
-    include: WITH_LINE_ITEMS,
   });
+
+  if (count === 0) {
+    const current = await getInvoice(organizationId, invoiceId);
+    throw ApiError.conflict(`Cannot move an invoice from ${current.status} to ${to}`);
+  }
+
+  return getInvoice(organizationId, invoiceId);
 }
 
 // DRAFT -> OPEN: the invoice is issued to the customer and its amounts are

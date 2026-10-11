@@ -599,6 +599,30 @@ describe('invoice status transitions', () => {
 
     await expect(finalizeInvoice(org.id, invoice.id)).rejects.toMatchObject({ status: 409 });
   });
+
+  it('lets only one of two concurrent attempts settle the same invoice', async () => {
+    // Both calls read the invoice as OPEN before either writes, the way two
+    // overlapping POST /invoices/:id/charge requests for the same invoice
+    // would. Without a conditional write, both would succeed and the
+    // invoice would be marked PAID (and its payment.paid webhook emitted)
+    // twice over.
+    const { org, invoice } = await makeDraftInvoice();
+    await finalizeInvoice(org.id, invoice.id);
+
+    const results = await Promise.allSettled([
+      markInvoicePaid(org.id, invoice.id),
+      markInvoicePaid(org.id, invoice.id),
+    ]);
+
+    const fulfilled = results.filter((result) => result.status === 'fulfilled');
+    const rejected = results.filter((result) => result.status === 'rejected');
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    expect((rejected[0] as PromiseRejectedResult).reason).toMatchObject({ status: 409 });
+
+    const final = await getInvoice(org.id, invoice.id);
+    expect(final.status).toBe('PAID');
+  });
 });
 
 describe('getInvoice', () => {
