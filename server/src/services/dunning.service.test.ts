@@ -157,6 +157,28 @@ describe('startDunning', () => {
     expect(second.lastFailureCode).toBe('insufficient_funds');
   });
 
+  it('opens only one campaign when two declines race on the same invoice', async () => {
+    // Both calls find no campaign before either writes, the way two
+    // overlapping POST /invoices/:id/charge calls declining the same
+    // invoice would. invoiceId's unique constraint is what actually stops
+    // a second campaign; without the fallback onto the "already exists"
+    // handling, the loser would throw instead of recording its failure
+    // code against the campaign the winner just opened.
+    const { org, invoice } = await makeBillingFixture();
+    const now = new Date('2026-06-01T00:00:00.000Z');
+
+    const results = await Promise.all([
+      startDunning(org.id, invoice.id, { failureCode: 'card_declined', now }),
+      startDunning(org.id, invoice.id, { failureCode: 'insufficient_funds', now }),
+    ]);
+
+    expect(results[0].id).toBe(results[1].id);
+    expect(['card_declined', 'insufficient_funds']).toContain(results[0].lastFailureCode);
+
+    const campaigns = await prisma.dunningCampaign.findMany({ where: { invoiceId: invoice.id } });
+    expect(campaigns).toHaveLength(1);
+  });
+
   it('refuses to dun an invoice that is not open', async () => {
     const { org, invoice } = await makeBillingFixture();
     await voidInvoice(org.id, invoice.id);

@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import { ApiError } from '../middleware/errorHandler';
 import { logger } from '../lib/logger';
 import { prisma } from '../lib/prisma';
@@ -68,6 +69,24 @@ export interface StartDunningOptions {
   now?: Date;
 }
 
+// A campaign already exists for this invoice: record the newer failure
+// code without restarting the schedule, unless it has already resolved —
+// in which case there is nothing left to update. Shared by the ordinary
+// "already exists" read in startDunning and by the race fallback below it,
+// which discovers the same thing by a different path (a unique constraint
+// violation instead of a read).
+function recordAgainstExistingCampaign(campaign: CampaignWithRelations, failureCode?: string | null) {
+  if (isTerminalDunningStatus(campaign.status as DunningStatus)) {
+    return campaign;
+  }
+
+  return prisma.dunningCampaign.update({
+    where: { id: campaign.id },
+    data: { lastFailureCode: failureCode ?? campaign.lastFailureCode },
+    include: WITH_RELATIONS,
+  });
+}
+
 // Opens (or re-uses) the recovery campaign for an invoice whose payment just
 // failed, and marks the subscription PAST_DUE. Idempotent by design: a
 // second failure on an invoice that is already in dunning records the newer
@@ -95,46 +114,61 @@ export async function startDunning(
     include: WITH_RELATIONS,
   });
   if (existing) {
-    if (isTerminalDunningStatus(existing.status as DunningStatus)) {
-      return existing;
-    }
-
-    return prisma.dunningCampaign.update({
-      where: { id: existing.id },
-      data: { lastFailureCode: options.failureCode ?? existing.lastFailureCode },
-      include: WITH_RELATIONS,
-    });
+    return recordAgainstExistingCampaign(existing, options.failureCode);
   }
 
-  const campaign = await prisma.$transaction(async (tx) => {
-    const created = await tx.dunningCampaign.create({
-      data: {
-        organizationId,
-        invoiceId: invoice.id,
-        subscriptionId: invoice.subscriptionId,
-        status: 'SCHEDULED',
-        attemptsMade: 0,
-        startedAt: now,
-        nextAttemptAt: nextDunningAttemptAt(now, 0),
-        lastFailureCode: options.failureCode ?? null,
-      },
-      include: WITH_RELATIONS,
+  let campaign;
+  try {
+    campaign = await prisma.$transaction(async (tx) => {
+      const created = await tx.dunningCampaign.create({
+        data: {
+          organizationId,
+          invoiceId: invoice.id,
+          subscriptionId: invoice.subscriptionId,
+          status: 'SCHEDULED',
+          attemptsMade: 0,
+          startedAt: now,
+          nextAttemptAt: nextDunningAttemptAt(now, 0),
+          lastFailureCode: options.failureCode ?? null,
+        },
+        include: WITH_RELATIONS,
+      });
+
+      // A canceled subscription stays canceled — dunning on a leftover open
+      // invoice shouldn't quietly revive it.
+      if (created.subscription.status !== 'CANCELED') {
+        await tx.subscription.update({
+          where: { id: created.subscriptionId },
+          data: { status: 'PAST_DUE' },
+        });
+        await tx.subscriptionEvent.create({
+          data: { subscriptionId: created.subscriptionId, type: 'PAST_DUE' },
+        });
+      }
+
+      return created;
     });
-
-    // A canceled subscription stays canceled — dunning on a leftover open
-    // invoice shouldn't quietly revive it.
-    if (created.subscription.status !== 'CANCELED') {
-      await tx.subscription.update({
-        where: { id: created.subscriptionId },
-        data: { status: 'PAST_DUE' },
+  } catch (err) {
+    // The `existing` read above and this create race the same way
+    // transitionInvoice's read-then-write did (see invoice.service.ts): two
+    // declines on the same invoice — plausibly two overlapping
+    // POST /invoices/:id/charge calls — can both find no campaign before
+    // either writes. invoiceId's unique constraint is what actually stops a
+    // second campaign, and the loser hits it here instead of creating one.
+    // Falling back to the same "already exists" handling used above is what
+    // makes the "idempotent by design" promise at the top of this function
+    // hold under concurrency too, rather than this call failing outright
+    // and its decline going unrecovered (chargeInvoice logs and swallows
+    // whatever this throws).
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+      const raced = await prisma.dunningCampaign.findUniqueOrThrow({
+        where: { invoiceId: invoice.id },
+        include: WITH_RELATIONS,
       });
-      await tx.subscriptionEvent.create({
-        data: { subscriptionId: created.subscriptionId, type: 'PAST_DUE' },
-      });
+      return recordAgainstExistingCampaign(raced, options.failureCode);
     }
-
-    return created;
-  });
+    throw err;
+  }
 
   await webhookService.emitEvent(organizationId, 'dunning.started', {
     campaignId: campaign.id,
