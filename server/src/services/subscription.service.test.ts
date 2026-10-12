@@ -176,6 +176,32 @@ describe('cancelSubscription', () => {
       status: 409,
     });
   });
+
+  it('lets only one of two concurrent cancellations apply', async () => {
+    // Both calls read a not-yet-canceled subscription before either writes,
+    // the way two overlapping DELETE /subscriptions/:id requests would.
+    // Without a conditional write, both would succeed, each creating a
+    // CANCELED SubscriptionEvent and emitting subscription.canceled.
+    const org = await makeOrg('Acme');
+    const customer = await createCustomer(org.id, { name: 'Jane Doe', email: 'jane@example.com' });
+    const plan = await makeFlatPlan(org.id, 'Pro Monthly', 1000);
+    const subscription = await createSubscription(org.id, { customerId: customer.id, planId: plan.id });
+
+    const results = await Promise.allSettled([
+      cancelSubscription(org.id, subscription.id, { atPeriodEnd: false }),
+      cancelSubscription(org.id, subscription.id, { atPeriodEnd: false }),
+    ]);
+
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+    const rejected = results.filter((result) => result.status === 'rejected');
+    expect(rejected).toHaveLength(1);
+    expect((rejected[0] as PromiseRejectedResult).reason).toMatchObject({ status: 409 });
+
+    const events = await prisma.subscriptionEvent.findMany({
+      where: { subscriptionId: subscription.id, type: 'CANCELED' },
+    });
+    expect(events).toHaveLength(1);
+  });
 });
 
 describe('changeSubscriptionPlan', () => {
@@ -260,6 +286,36 @@ describe('endTrial', () => {
     const subscription = await createSubscription(org.id, { customerId: customer.id, planId: plan.id });
 
     await expect(endTrial(org.id, subscription.id)).rejects.toMatchObject({ status: 400 });
+  });
+
+  it('lets only one of two concurrent calls end the same trial', async () => {
+    // Same race as cancelSubscription: both calls read TRIALING before
+    // either writes, the way two overlapping requests would. Without a
+    // conditional write, both would succeed, each creating a TRIAL_ENDED
+    // event and emitting subscription.updated.
+    const org = await makeOrg('Acme');
+    const customer = await createCustomer(org.id, { name: 'Jane Doe', email: 'jane@example.com' });
+    const plan = await makeFlatPlan(org.id, 'Pro Monthly', 1000);
+    const subscription = await createSubscription(org.id, {
+      customerId: customer.id,
+      planId: plan.id,
+      trialDays: 14,
+    });
+
+    const results = await Promise.allSettled([
+      endTrial(org.id, subscription.id),
+      endTrial(org.id, subscription.id),
+    ]);
+
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+    const rejected = results.filter((result) => result.status === 'rejected');
+    expect(rejected).toHaveLength(1);
+    expect((rejected[0] as PromiseRejectedResult).reason).toMatchObject({ status: 400 });
+
+    const events = await prisma.subscriptionEvent.findMany({
+      where: { subscriptionId: subscription.id, type: 'TRIAL_ENDED' },
+    });
+    expect(events).toHaveLength(1);
   });
 });
 

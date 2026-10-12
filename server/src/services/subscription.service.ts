@@ -133,13 +133,25 @@ export async function cancelSubscription(
   const now = new Date();
 
   const updated = await prisma.$transaction(async (tx) => {
-    const canceled = await tx.subscription.update({
-      where: { id: subscriptionId },
+    // Conditioned on the status just read, the same way
+    // invoice.service.ts's transitionInvoice guards a settlement: two
+    // concurrent cancel requests for the same subscription (most plausibly
+    // a double-submitted button click) could otherwise both read a
+    // not-yet-canceled status before either wrote, and both would create a
+    // CANCELED SubscriptionEvent and emit subscription.canceled. Only the
+    // request that still finds the subscription not canceled applies; the
+    // loser gets the same 409 an already-canceled subscription already
+    // produces.
+    const { count } = await tx.subscription.updateMany({
+      where: { id: subscriptionId, organizationId, status: { not: 'CANCELED' } },
       data: input.atPeriodEnd
         ? { cancelAt: subscription.currentPeriodEnd }
         : { status: 'CANCELED', canceledAt: now, cancelAt: now },
-      include: WITH_RELATIONS,
     });
+
+    if (count === 0) {
+      throw ApiError.conflict('Subscription is already canceled');
+    }
 
     await tx.subscriptionEvent.create({
       data: {
@@ -148,7 +160,10 @@ export async function cancelSubscription(
       },
     });
 
-    return canceled;
+    return tx.subscription.findFirstOrThrow({
+      where: { id: subscriptionId },
+      include: WITH_RELATIONS,
+    });
   });
 
   // A cancellation scheduled for period end hasn't ended anything yet, so it
@@ -249,22 +264,31 @@ export async function endTrial(organizationId: string, subscriptionId: string) {
   const currentPeriodEnd = addInterval(now, subscription.plan.interval as BillingInterval);
 
   const updated = await prisma.$transaction(async (tx) => {
-    const active = await tx.subscription.update({
-      where: { id: subscriptionId },
+    // Same race as cancelSubscription above: two concurrent calls could
+    // otherwise both read TRIALING before either wrote, and both would
+    // create a TRIAL_ENDED event and emit subscription.updated.
+    const { count } = await tx.subscription.updateMany({
+      where: { id: subscriptionId, organizationId, status: 'TRIALING' },
       data: {
         status: 'ACTIVE',
         currentPeriodStart: now,
         currentPeriodEnd,
         trialEnd: now,
       },
-      include: WITH_RELATIONS,
     });
+
+    if (count === 0) {
+      throw ApiError.badRequest('Subscription is not currently in a trial');
+    }
 
     await tx.subscriptionEvent.create({
       data: { subscriptionId, type: 'TRIAL_ENDED' },
     });
 
-    return active;
+    return tx.subscription.findFirstOrThrow({
+      where: { id: subscriptionId },
+      include: WITH_RELATIONS,
+    });
   });
 
   await webhookService.emitEvent(organizationId, 'subscription.updated', {
