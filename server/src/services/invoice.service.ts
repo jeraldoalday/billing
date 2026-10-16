@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import { ApiError } from '../middleware/errorHandler';
 import { prisma } from '../lib/prisma';
 import { calculateCustomerTax } from '../domain/tax';
@@ -148,7 +149,9 @@ async function uninvoicedProrationLineItems(subscriptionId: string): Promise<Dra
 // Generates a DRAFT invoice for a subscription's current billing period:
 // the plan's recurring price plus any proration carried over from mid-period
 // plan changes since the last invoice. Refuses to double-invoice the same
-// period (only one non-VOID invoice may exist per subscription per period).
+// period (only one non-VOID invoice may exist per subscription per period) —
+// this read is the fast path for the ordinary sequential case; the create
+// below is what actually enforces it against two concurrent calls.
 export async function generateInvoice(organizationId: string, input: GenerateInvoiceInput) {
   const subscription = await subscriptionService.getSubscription(
     organizationId,
@@ -213,40 +216,56 @@ export async function generateInvoice(organizationId: string, input: GenerateInv
     taxAmount: calculateCustomerTax(subtotal - discountAmount, subscription.customer).amount,
   });
 
-  const invoice = await prisma.$transaction(async (tx) => {
-    const organization = await tx.organization.update({
-      where: { id: organizationId },
-      data: { invoiceSequence: { increment: 1 } },
-    });
+  let invoice;
+  try {
+    invoice = await prisma.$transaction(async (tx) => {
+      const organization = await tx.organization.update({
+        where: { id: organizationId },
+        data: { invoiceSequence: { increment: 1 } },
+      });
 
-    const created = await tx.invoice.create({
-      data: {
-        organizationId,
-        customerId: subscription.customerId,
-        subscriptionId: subscription.id,
-        number: formatInvoiceNumber(organization.invoiceSequence),
-        status: 'DRAFT',
-        currency: subscription.plan.currency,
-        periodStart: subscription.currentPeriodStart,
-        periodEnd: subscription.currentPeriodEnd,
-        subtotal,
-        discountAmount,
-        taxAmount,
-        total,
-        lineItems: { create: lineItems },
-      },
-      include: WITH_LINE_ITEMS,
-    });
+      const created = await tx.invoice.create({
+        data: {
+          organizationId,
+          customerId: subscription.customerId,
+          subscriptionId: subscription.id,
+          number: formatInvoiceNumber(organization.invoiceSequence),
+          status: 'DRAFT',
+          currency: subscription.plan.currency,
+          periodStart: subscription.currentPeriodStart,
+          periodEnd: subscription.currentPeriodEnd,
+          subtotal,
+          discountAmount,
+          taxAmount,
+          total,
+          lineItems: { create: lineItems },
+        },
+        include: WITH_LINE_ITEMS,
+      });
 
-    // A redemption that produced no discount (nothing to discount on a zero
-    // subtotal) hasn't been used up, so it keeps its remaining periods for
-    // the next invoice that actually charges something.
-    if (redemption && discountAmount > 0) {
-      await couponService.consumeRedemptionPeriod(tx, redemption);
+      // A redemption that produced no discount (nothing to discount on a zero
+      // subtotal) hasn't been used up, so it keeps its remaining periods for
+      // the next invoice that actually charges something.
+      if (redemption && discountAmount > 0) {
+        await couponService.consumeRedemptionPeriod(tx, redemption);
+      }
+
+      return created;
+    });
+  } catch (err) {
+    // The `existing` read above and this create race the same way
+    // startDunning's idempotency check and transitionInvoice's write used
+    // to (see dunning.service.ts and the history of this function): two
+    // concurrent calls to generate an invoice for the same subscription and
+    // period can both find nothing before either writes. The partial
+    // unique index added for this (`invoices_subscription_period_open_key`)
+    // is what actually stops the second one, and the loser hits it here
+    // instead of leaving two non-VOID invoices on the same period.
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+      throw ApiError.conflict("An invoice already exists for this subscription's current period");
     }
-
-    return created;
-  });
+    throw err;
+  }
 
   await webhookService.emitEvent(organizationId, 'invoice.created', invoiceEventData(invoice));
 

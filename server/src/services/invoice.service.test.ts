@@ -244,6 +244,34 @@ describe('generateInvoice', () => {
     });
   });
 
+  it('lets only one of two concurrent calls generate an invoice for the same period', async () => {
+    // Both calls find no existing invoice before either writes, the way
+    // two overlapping POST /invoices requests for the same subscription
+    // would. Without the partial unique index backing this, both would
+    // succeed and the period would end up with two non-VOID invoices.
+    const org = await makeOrg('Acme');
+    const customer = await createCustomer(org.id, { name: 'Jane Doe', email: 'jane@example.com' });
+    const plan = await makeFlatPlan(org.id, 'Pro Monthly', 2900);
+    const subscription = await createSubscription(org.id, {
+      customerId: customer.id,
+      planId: plan.id,
+    });
+
+    const results = await Promise.allSettled([
+      generateInvoice(org.id, { subscriptionId: subscription.id }),
+      generateInvoice(org.id, { subscriptionId: subscription.id }),
+    ]);
+
+    const fulfilled = results.filter((result) => result.status === 'fulfilled');
+    const rejected = results.filter((result) => result.status === 'rejected');
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    expect((rejected[0] as PromiseRejectedResult).reason).toMatchObject({ status: 409 });
+
+    const invoices = await prisma.invoice.findMany({ where: { subscriptionId: subscription.id } });
+    expect(invoices).toHaveLength(1);
+  });
+
   it('allows regenerating an invoice for the period once the first was voided', async () => {
     const org = await makeOrg('Acme');
     const customer = await createCustomer(org.id, { name: 'Jane Doe', email: 'jane@example.com' });

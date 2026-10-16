@@ -240,6 +240,13 @@ model SubscriptionEvent {
 /// amount a redeemed Coupon took off (also written as a negative DISCOUNT
 /// line item so it shows on the rendered invoice), and tax is charged on
 /// what's left after the discount, not on the pre-discount subtotal.
+///
+/// At most one non-VOID invoice may exist per (subscriptionId, periodStart,
+/// periodEnd) — enforced by a hand-written partial unique index
+/// (`invoices_subscription_period_open_key`, see the
+/// add_invoice_period_unique_index migration) rather than `@@unique` below,
+/// since "unique among non-VOID rows" can't be expressed in schema.prisma
+/// and a VOIDed invoice must still leave the period free to be re-invoiced.
 model Invoice {
   id             String       @id @default(cuid())
   organizationId String
