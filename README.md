@@ -4,6 +4,8 @@ A subscription billing platform: customers, pricing plans, subscriptions, invoic
 generation, payments, usage-based metering, dunning, coupons, webhooks, and revenue
 reporting (MRR/churn/ARPU).
 
+> **How this project is built:** I develop this platform with AI coding agents. I decide what the billing rules should be, review each change and its tests, and merge what holds up.
+
 ## Stack
 
 - **Server**: Node.js, TypeScript, Express, Prisma (SQLite for local dev), Zod, Pino
