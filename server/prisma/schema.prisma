@@ -563,10 +563,14 @@ model Coupon {
 /// ACTIVE/COMPLETED/REMOVED) is a plain string like the other status fields
 /// in this schema.
 ///
-/// A subscription may hold at most one ACTIVE redemption at a time (enforced
-/// in src/services/coupon.service.ts, not the schema, since SQLite has no
-/// partial unique index) — stacking discounts would make the order they
-/// apply in matter, and nothing in the API expresses that order.
+/// A subscription may hold at most one ACTIVE redemption at a time —
+/// stacking discounts would make the order they apply in matter, and
+/// nothing in the API expresses that order. `@@unique` can't express
+/// "unique among ACTIVE rows" in schema.prisma, so this is enforced by a
+/// hand-written partial unique index
+/// (`coupon_redemptions_subscription_active_key`, see the
+/// add_coupon_redemption_active_unique_index migration) rather than one
+/// below, the same way Invoice's per-period uniqueness is.
 model CouponRedemption {
   id             String       @id @default(cuid())
   organizationId String

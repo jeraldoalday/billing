@@ -241,6 +241,41 @@ describe('redeemCoupon', () => {
     });
   });
 
+  it('lets only one of two concurrent redemptions attach to the same subscription', async () => {
+    // Both calls find no active redemption before either writes, the way
+    // two overlapping POST /subscriptions/:id/coupon requests on the same
+    // subscription would. coupon_redemptions_subscription_active_key is
+    // what actually stops the second one; without the fallback onto the
+    // same 409 the sequential check throws, the loser would surface a raw
+    // database error instead.
+    const org = await makeOrg('Acme');
+    await createCoupon(org.id, PERCENT_COUPON);
+    await createCoupon(org.id, { ...PERCENT_COUPON, code: 'SAVE30', percentOff: 30 });
+    const { subscription } = await makeSubscription(org.id);
+
+    const results = await Promise.allSettled([
+      redeemCoupon(org.id, subscription.id, { code: 'SAVE20' }),
+      redeemCoupon(org.id, subscription.id, { code: 'SAVE30' }),
+    ]);
+
+    const fulfilled = results.filter((result) => result.status === 'fulfilled');
+    const rejected = results.filter((result) => result.status === 'rejected');
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    expect((rejected[0] as PromiseRejectedResult).reason).toMatchObject({ status: 409 });
+
+    const redemptions = await prisma.couponRedemption.findMany({
+      where: { subscriptionId: subscription.id, status: 'ACTIVE' },
+    });
+    expect(redemptions).toHaveLength(1);
+    const winner = redemptions[0]!;
+
+    // The loser's coupon.update (incrementing timesRedeemed) rolled back
+    // with the rest of its transaction, so only the winner's coupon was
+    // counted as redeemed, whichever of the two it was.
+    expect((await getCoupon(org.id, winner.couponId)).timesRedeemed).toBe(1);
+  });
+
   it('allows a new coupon once the previous one has been removed', async () => {
     const org = await makeOrg('Acme');
     await createCoupon(org.id, PERCENT_COUPON);

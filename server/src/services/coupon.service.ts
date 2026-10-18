@@ -1,4 +1,4 @@
-import type { Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { ApiError } from '../middleware/errorHandler';
 import { prisma } from '../lib/prisma';
 import {
@@ -171,22 +171,38 @@ export async function redeemCoupon(
   // The redemption counter and the redemption row move together: counting a
   // redemption that failed to be written (or writing one that wasn't
   // counted) would let a capped coupon be over- or under-redeemed.
-  return prisma.$transaction(async (tx) => {
-    await tx.coupon.update({
-      where: { id: coupon.id },
-      data: { timesRedeemed: { increment: 1 } },
-    });
+  try {
+    return await prisma.$transaction(async (tx) => {
+      await tx.coupon.update({
+        where: { id: coupon.id },
+        data: { timesRedeemed: { increment: 1 } },
+      });
 
-    return tx.couponRedemption.create({
-      data: {
-        organizationId,
-        couponId: coupon.id,
-        subscriptionId,
-        status: 'ACTIVE',
-      },
-      include: WITH_COUPON,
+      return tx.couponRedemption.create({
+        data: {
+          organizationId,
+          couponId: coupon.id,
+          subscriptionId,
+          status: 'ACTIVE',
+        },
+        include: WITH_COUPON,
+      });
     });
-  });
+  } catch (err) {
+    // The `active` read above and this create race the same way
+    // generateInvoice's existing-invoice check and startDunning's
+    // idempotency check used to (see invoice.service.ts and
+    // dunning.service.ts): two overlapping redeemCoupon calls on the same
+    // subscription can both find no active redemption before either
+    // writes. The partial unique index added for this
+    // (`coupon_redemptions_subscription_active_key`) is what actually
+    // stops the second one, and the loser hits it here instead of leaving
+    // two ACTIVE redemptions on the same subscription.
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+      throw ApiError.conflict('This subscription already has an active coupon');
+    }
+    throw err;
+  }
 }
 
 // The redemption currently discounting a subscription's invoices, if any.
