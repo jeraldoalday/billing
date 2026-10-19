@@ -10,6 +10,16 @@ describe('detectCardBrand', () => {
     expect(detectCardBrand('5555555555554444')).toBe('MASTERCARD');
   });
 
+  it('detects Mastercard numbers in the newer 2221-2720 range', () => {
+    expect(detectCardBrand('2223000048400011')).toBe('MASTERCARD');
+    expect(detectCardBrand('2720000000000000')).toBe('MASTERCARD');
+  });
+
+  it('does not misclassify numbers just outside the 2221-2720 range', () => {
+    expect(detectCardBrand('2220000000000000')).toBe('UNKNOWN');
+    expect(detectCardBrand('2721000000000000')).toBe('UNKNOWN');
+  });
+
   it('detects Amex numbers starting with 34 or 37', () => {
     expect(detectCardBrand('378282246310005')).toBe('AMEX');
     expect(detectCardBrand('341111111111111')).toBe('AMEX');

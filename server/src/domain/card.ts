@@ -13,13 +13,25 @@ export function detectCardBrand(cardNumber: string): CardBrand {
   if (/^4\d*$/.test(cardNumber)) {
     return 'VISA';
   }
-  if (/^5[1-5]\d*$/.test(cardNumber)) {
+  if (/^5[1-5]\d*$/.test(cardNumber) || isMastercard2Series(cardNumber)) {
     return 'MASTERCARD';
   }
   if (/^3[47]\d*$/.test(cardNumber)) {
     return 'AMEX';
   }
   return 'UNKNOWN';
+}
+
+// Mastercard's 2016 range extension added BINs 222100-272099 (a 4-digit
+// prefix of 2221-2720) alongside the original 51-55 range, to keep up with
+// demand for new BINs. A plain character-class regex can't express that
+// numeric range, so the prefix is parsed and compared directly.
+function isMastercard2Series(cardNumber: string): boolean {
+  if (cardNumber.length < 4) {
+    return false;
+  }
+  const prefix = Number(cardNumber.slice(0, 4));
+  return Number.isInteger(prefix) && prefix >= 2221 && prefix <= 2720;
 }
 
 export function lastFour(cardNumber: string): string {
