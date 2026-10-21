@@ -49,6 +49,37 @@ describe('Modal', () => {
     expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
   });
 
+  it('wraps Tab from the last focusable element back to the first', async () => {
+    renderModal();
+
+    const cancelButton = screen.getByRole('button', { name: 'Cancel' });
+    cancelButton.focus();
+
+    await userEvent.tab();
+
+    expect(screen.getByLabelText('Name')).toHaveFocus();
+  });
+
+  it('wraps Shift+Tab from the first focusable element to the last', async () => {
+    renderModal();
+
+    screen.getByLabelText('Name').focus();
+
+    await userEvent.tab({ shift: true });
+
+    expect(screen.getByRole('button', { name: 'Cancel' })).toHaveFocus();
+  });
+
+  it('wraps Shift+Tab pressed right after opening, before focus has left the panel', async () => {
+    renderModal();
+
+    expect(screen.getByRole('dialog', { name: 'New customer' })).toHaveFocus();
+
+    await userEvent.tab({ shift: true });
+
+    expect(screen.getByRole('button', { name: 'Cancel' })).toHaveFocus();
+  });
+
   it('stops listening for Escape once it is gone', async () => {
     const onClose = vi.fn();
     const { unmount } = render(

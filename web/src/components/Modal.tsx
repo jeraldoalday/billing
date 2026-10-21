@@ -36,6 +36,43 @@ export function Modal({ title, description, onClose, footer, children }: ModalPr
     function onKeyDown(event: KeyboardEvent) {
       if (event.key === 'Escape') {
         onClose();
+        return;
+      }
+
+      // Without this, Tab/Shift+Tab eventually walks off the panel and onto
+      // whatever's behind it — the same page-underneath leak the initial
+      // focus move above exists to avoid, just reachable a key press later
+      // instead of immediately on open.
+      if (event.key === 'Tab') {
+        const panel = panelRef.current;
+        if (!panel) {
+          return;
+        }
+
+        const focusable = panel.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        );
+        if (focusable.length === 0) {
+          // Nothing inside to tab to — keep focus pinned on the panel
+          // itself rather than letting it escape to the page underneath.
+          event.preventDefault();
+          return;
+        }
+
+        const first = focusable[0]!;
+        const last = focusable[focusable.length - 1]!;
+        const active = document.activeElement;
+
+        // `active === panel` covers Shift+Tab pressed right after opening,
+        // before focus has moved off the panel itself onto any child — the
+        // moment the initial-focus effect above hands off to this trap.
+        if (event.shiftKey && (active === first || active === panel)) {
+          event.preventDefault();
+          last.focus();
+        } else if (!event.shiftKey && active === last) {
+          event.preventDefault();
+          first.focus();
+        }
       }
     }
     document.addEventListener('keydown', onKeyDown);
