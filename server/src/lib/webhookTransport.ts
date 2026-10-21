@@ -1,3 +1,4 @@
+import { isSuccessfulWebhookResponse } from '../domain/webhook';
 import { logger } from './logger';
 
 // A WebhookTransport abstraction so the rest of the codebase never talks to
@@ -50,7 +51,7 @@ export class HttpWebhookTransport implements WebhookTransport {
         signal: controller.signal,
       });
 
-      if (response.status >= 200 && response.status < 300) {
+      if (isSuccessfulWebhookResponse(response.status)) {
         return { ok: true, status: response.status };
       }
 
