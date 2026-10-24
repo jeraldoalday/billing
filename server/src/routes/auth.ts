@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { requireAuth } from '../middleware/auth';
 import { ApiError } from '../middleware/errorHandler';
-import { loginRateLimiter, signupRateLimiter } from '../middleware/rateLimit';
+import { loginRateLimiter, profileUpdateRateLimiter, signupRateLimiter } from '../middleware/rateLimit';
 import { prisma } from '../lib/prisma';
 import * as authService from '../services/auth.service';
 import { loginSchema, signupSchema, updateProfileSchema } from '../validators/auth';
@@ -57,7 +57,7 @@ authRouter.get('/auth/me', requireAuth, async (req, res, next) => {
   }
 });
 
-authRouter.patch('/auth/me', requireAuth, async (req, res, next) => {
+authRouter.patch('/auth/me', requireAuth, profileUpdateRateLimiter, async (req, res, next) => {
   try {
     if (!req.auth) {
       throw ApiError.unauthorized();
