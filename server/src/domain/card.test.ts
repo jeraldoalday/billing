@@ -25,8 +25,13 @@ describe('detectCardBrand', () => {
     expect(detectCardBrand('341111111111111')).toBe('AMEX');
   });
 
+  it('detects Discover numbers starting with 6011 or 65', () => {
+    expect(detectCardBrand('6011111111111117')).toBe('DISCOVER');
+    expect(detectCardBrand('6500000000000002')).toBe('DISCOVER');
+  });
+
   it('falls back to UNKNOWN for anything else', () => {
-    expect(detectCardBrand('6011111111111117')).toBe('UNKNOWN');
+    expect(detectCardBrand('9999999999999995')).toBe('UNKNOWN');
   });
 });
 

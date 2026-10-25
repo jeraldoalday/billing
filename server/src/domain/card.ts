@@ -3,7 +3,7 @@
 // kept (see prisma/schema.prisma) — the raw number itself is never
 // persisted, mirroring how real payment processors avoid storing a PAN.
 
-export const CARD_BRANDS = ['VISA', 'MASTERCARD', 'AMEX', 'UNKNOWN'] as const;
+export const CARD_BRANDS = ['VISA', 'MASTERCARD', 'AMEX', 'DISCOVER', 'UNKNOWN'] as const;
 export type CardBrand = (typeof CARD_BRANDS)[number];
 
 // Minimal IIN/BIN range detection, enough to distinguish the major brands
@@ -18,6 +18,14 @@ export function detectCardBrand(cardNumber: string): CardBrand {
   }
   if (/^3[47]\d*$/.test(cardNumber)) {
     return 'AMEX';
+  }
+  // Discover's two best-known prefixes: the original 6011 BIN and the
+  // later 65 range. (Like Mastercard's 2-series, Discover also carries a
+  // numeric 622126-622925 range and a 644-649 range; those are omitted
+  // here for the same "not exhaustive" reason the file-level comment
+  // already gives.)
+  if (/^(6011|65)\d*$/.test(cardNumber)) {
+    return 'DISCOVER';
   }
   return 'UNKNOWN';
 }
