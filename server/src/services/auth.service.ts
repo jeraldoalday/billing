@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import { ApiError } from '../middleware/errorHandler';
 import { hashPassword, verifyPassword } from '../lib/password';
 import { signAccessToken } from '../lib/jwt';
@@ -11,24 +12,19 @@ export interface AuthResult {
   organization: { id: string; name: string; slug: string };
 }
 
+// Up to 5 attempts in the (rare) case a slug keeps colliding; each retry
+// uses a freshly random suffix, so a run of actual collisions this long is
+// astronomically unlikely and not worth a backoff delay.
+const MAX_SLUG_ATTEMPTS = 5;
+
 async function generateUniqueSlug(organizationName: string): Promise<string> {
   const base = slugify(organizationName) || 'org';
   const existing = await prisma.organization.findUnique({ where: { slug: base } });
   return existing ? withUniqueSuffix(base) : base;
 }
 
-export async function signup(input: SignupInput): Promise<AuthResult> {
-  const existingUser = await prisma.user.findUnique({ where: { email: input.email } });
-  if (existingUser) {
-    throw ApiError.conflict('An account with this email already exists');
-  }
-
-  const [slug, passwordHash] = await Promise.all([
-    generateUniqueSlug(input.organizationName),
-    hashPassword(input.password),
-  ]);
-
-  const organization = await prisma.organization.create({
+async function createOrganization(input: SignupInput, passwordHash: string, slug: string) {
+  return prisma.organization.create({
     data: {
       name: input.organizationName,
       slug,
@@ -42,6 +38,53 @@ export async function signup(input: SignupInput): Promise<AuthResult> {
     },
     include: { users: true },
   });
+}
+
+// True when a write failed on organization.slug's unique constraint
+// specifically, as opposed to some other P2002 (which should still
+// surface as-is rather than be retried as if it were this one).
+function isSlugConflict(err: unknown): boolean {
+  return (
+    err instanceof Prisma.PrismaClientKnownRequestError &&
+    err.code === 'P2002' &&
+    (err.meta?.target as string[] | undefined)?.includes('slug') === true
+  );
+}
+
+export async function signup(input: SignupInput): Promise<AuthResult> {
+  const existingUser = await prisma.user.findUnique({ where: { email: input.email } });
+  if (existingUser) {
+    throw ApiError.conflict('An account with this email already exists');
+  }
+
+  const [slug, passwordHash] = await Promise.all([
+    generateUniqueSlug(input.organizationName),
+    hashPassword(input.password),
+  ]);
+
+  // generateUniqueSlug's read above and the create below race the same way
+  // other uniqueness checks in this codebase do (see e.g. the partial index
+  // in invoice.service.ts): two signups for the same organization name
+  // arriving at the same instant can both see their slug free and then
+  // collide on the write. The loser retries with a fresh suffix instead of
+  // surfacing a raw 500 for what is, from the caller's side, a perfectly
+  // ordinary signup.
+  let organization: Awaited<ReturnType<typeof createOrganization>> | undefined;
+  for (let attempt = 0; attempt < MAX_SLUG_ATTEMPTS; attempt += 1) {
+    const candidateSlug = attempt === 0 ? slug : withUniqueSuffix(slugify(input.organizationName) || 'org');
+    try {
+      // eslint-disable-next-line no-await-in-loop -- each attempt depends on whether the previous one lost the race
+      organization = await createOrganization(input, passwordHash, candidateSlug);
+      break;
+    } catch (err) {
+      if (!isSlugConflict(err) || attempt === MAX_SLUG_ATTEMPTS - 1) {
+        throw err;
+      }
+    }
+  }
+  if (!organization) {
+    throw new Error('Failed to create organization during signup');
+  }
 
   const user = organization.users[0];
   if (!user) {

@@ -48,6 +48,16 @@ describe('signup', () => {
     expect(first.organization.slug).not.toBe(second.organization.slug);
   });
 
+  it('gives both organizations a distinct slug when two signups for the same name race', async () => {
+    const [first, second] = await Promise.all([
+      signup({ organizationName: 'Acme Corp', email: 'racer-a@acme.test', password: 'super-secret-1' }),
+      signup({ organizationName: 'Acme Corp', email: 'racer-b@acme.test', password: 'super-secret-1' }),
+    ]);
+
+    expect(first.organization.slug).not.toBe(second.organization.slug);
+    expect([first.organization.slug, second.organization.slug]).toContain('acme-corp');
+  });
+
   it('rejects signup with an email already in use', async () => {
     await signup({
       organizationName: 'Acme Corp',
