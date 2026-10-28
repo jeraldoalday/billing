@@ -46,6 +46,31 @@ export function lastFour(cardNumber: string): string {
   return cardNumber.slice(-4);
 }
 
+// Luhn checksum (ISO/IEC 7812-1), the same mod-10 check every real card
+// issuer runs before a number ever reaches a processor. It catches the
+// common case this platform can actually prevent — a transposed or mistyped
+// digit — before the number is "tokenized" and the raw digits are gone for
+// good; it says nothing about whether the account itself is live.
+export function isValidLuhn(cardNumber: string): boolean {
+  let sum = 0;
+  let alternate = false;
+  for (let i = cardNumber.length - 1; i >= 0; i--) {
+    let digit = cardNumber.charCodeAt(i) - 48;
+    if (digit < 0 || digit > 9) {
+      return false;
+    }
+    if (alternate) {
+      digit *= 2;
+      if (digit > 9) {
+        digit -= 9;
+      }
+    }
+    sum += digit;
+    alternate = !alternate;
+  }
+  return sum % 10 === 0;
+}
+
 // True once the card's expiration has passed as of `now`, using the
 // standard convention that a card is valid through the LAST instant of its
 // expiry month (e.g. a card expiring 03/2026 is still usable throughout

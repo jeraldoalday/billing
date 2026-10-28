@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { detectCardBrand, isCardExpired, lastFour } from './card';
+import { detectCardBrand, isCardExpired, isValidLuhn, lastFour } from './card';
 
 describe('detectCardBrand', () => {
   it('detects Visa numbers starting with 4', () => {
@@ -38,6 +38,22 @@ describe('detectCardBrand', () => {
 describe('lastFour', () => {
   it('returns the last four digits of a card number', () => {
     expect(lastFour('4242424242424242')).toBe('4242');
+  });
+});
+
+describe('isValidLuhn', () => {
+  it('accepts well-known test card numbers', () => {
+    expect(isValidLuhn('4242424242424242')).toBe(true);
+    expect(isValidLuhn('5555555555554444')).toBe(true);
+    expect(isValidLuhn('378282246310005')).toBe(true);
+  });
+
+  it('rejects a number with a single transposed or mistyped digit', () => {
+    expect(isValidLuhn('4242424242424241')).toBe(false);
+  });
+
+  it('rejects a non-digit character the length regex would already exclude', () => {
+    expect(isValidLuhn('424242424242424a')).toBe(false);
   });
 });
 
