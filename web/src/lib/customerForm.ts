@@ -55,8 +55,13 @@ function normalizeTaxId(raw: string): string {
 function validate(state: CustomerFormState): CustomerFieldErrors {
   const errors: CustomerFieldErrors = {};
 
-  if (state.name.trim() === '') {
+  const name = state.name.trim();
+  if (name === '') {
     errors.name = 'Enter a name';
+  } else if (name.length > 200) {
+    // Matches the server's createCustomerSchema/updateCustomerSchema cap —
+    // catching it here saves a round trip just to find out.
+    errors.name = 'Name must be 200 characters or fewer';
   }
 
   const email = state.email.trim();
@@ -66,6 +71,9 @@ function validate(state: CustomerFormState): CustomerFieldErrors {
     // A cheap shape check to catch a typo before a round trip; the server
     // remains the authority on whether the address is acceptable.
     errors.email = 'Enter a valid email address';
+  } else if (email.length > 254) {
+    // Matches the server's cap (RFC 5321's own limit on a full address).
+    errors.email = 'Email must be 254 characters or fewer';
   }
 
   const country = parseOptionalCountry(state.country);

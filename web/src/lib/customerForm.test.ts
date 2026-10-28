@@ -97,6 +97,19 @@ describe('toCreateCustomerInput', () => {
     expect(result).toMatchObject({ ok: false, fieldErrors: { email: 'Enter a valid email address' } });
   });
 
+  it('rejects a name longer than the server allows', () => {
+    const result = toCreateCustomerInput(filled({ name: 'a'.repeat(201) }));
+
+    expect(result).toMatchObject({ ok: false, fieldErrors: { name: 'Name must be 200 characters or fewer' } });
+  });
+
+  it('rejects an email longer than the server allows', () => {
+    const tooLong = `${'a'.repeat(250)}@b.co`;
+    const result = toCreateCustomerInput(filled({ email: tooLong }));
+
+    expect(result).toMatchObject({ ok: false, fieldErrors: { email: 'Email must be 254 characters or fewer' } });
+  });
+
   it('rejects a country that is not a 2-letter code', () => {
     expect(toCreateCustomerInput(filled({ country: 'United Kingdom' }))).toMatchObject({
       ok: false,
