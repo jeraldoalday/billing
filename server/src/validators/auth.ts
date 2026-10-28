@@ -2,10 +2,15 @@ import { z } from 'zod';
 
 // Emails are normalized (trimmed + lowercased) before validation so that
 // "Foo@Example.com" and "foo@example.com" are treated as the same address
-// for both the uniqueness check on signup and lookup on login.
+// for both the uniqueness check on signup and lookup on login. Capped at
+// 254 (RFC 5321's own limit on a full address), the same discipline every
+// other string field in this codebase follows — unlike those, an
+// unbounded email had nothing stopping a signup from storing one long
+// enough to make the uniqueness lookup and every later login do more work
+// than any real address ever needs.
 const normalizedEmail = z.preprocess(
   (value) => (typeof value === 'string' ? value.trim().toLowerCase() : value),
-  z.string().email(),
+  z.string().email().max(254),
 );
 
 export const signupSchema = z.object({

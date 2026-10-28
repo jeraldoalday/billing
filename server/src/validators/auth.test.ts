@@ -71,6 +71,17 @@ describe('signupSchema', () => {
       }),
     ).toThrow();
   });
+
+  it('rejects an email longer than RFC 5321 allows', () => {
+    const tooLong = `${'a'.repeat(250)}@b.co`;
+    expect(() =>
+      signupSchema.parse({
+        organizationName: 'Acme Corp',
+        email: tooLong,
+        password: 'super-secret-1',
+      }),
+    ).toThrow();
+  });
 });
 
 describe('loginSchema', () => {

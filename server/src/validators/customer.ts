@@ -21,7 +21,10 @@ const taxIdSchema = z
 
 export const createCustomerSchema = z.object({
   name: z.string().trim().min(1).max(200),
-  email: z.string().trim().toLowerCase().email(),
+  // 254 is RFC 5321's own limit on a full address — the same length cap
+  // every other string field here already has, which email alone was
+  // missing.
+  email: z.string().trim().toLowerCase().email().max(254),
   active: z.boolean().optional(),
   country: countrySchema.optional(),
   taxId: taxIdSchema.optional(),
@@ -32,7 +35,7 @@ export type CreateCustomerInput = z.infer<typeof createCustomerSchema>;
 export const updateCustomerSchema = z
   .object({
     name: z.string().trim().min(1).max(200).optional(),
-    email: z.string().trim().toLowerCase().email().optional(),
+    email: z.string().trim().toLowerCase().email().max(254).optional(),
     active: z.boolean().optional(),
     country: countrySchema.nullable().optional(),
     // Nullable so a customer who deregisters or loses their exemption can
