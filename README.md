@@ -350,6 +350,12 @@ next — including for the automated daily build (see `AGENT.md`).
 - [ ] Day 13: Frontend: subscriptions, invoices, settings UI
 - [ ] Day 14: Integration tests, docs, polish
 
+## Contributing
+
+Contributions are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) and the
+[Code of Conduct](CODE_OF_CONDUCT.md). Please report security issues privately as
+described in [SECURITY.md](SECURITY.md).
+
 ## License
 
-Unlicensed — personal project.
+[MIT](LICENSE) © Jerald Alday

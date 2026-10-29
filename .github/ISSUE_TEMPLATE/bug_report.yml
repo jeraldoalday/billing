@@ -1,0 +1,45 @@
+name: Bug report
+description: Something isn't working as expected
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! For security issues, please follow SECURITY.md instead of opening a public issue.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you see, and what did you expect to happen?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Create a plan with ...
+        2. Subscribe a customer ...
+        3. ...
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Server / API
+        - Worker / background jobs
+        - Web console
+        - Docs
+        - Other
+  - type: input
+    id: version
+    attributes:
+      label: Commit or version
+      placeholder: e.g. 422b96d
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or screenshots
+      render: shell
