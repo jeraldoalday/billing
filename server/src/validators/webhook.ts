@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { WEBHOOK_DELIVERY_STATUSES, WEBHOOK_EVENT_TYPES } from '../domain/webhook';
+import { WEBHOOK_DELIVERY_STATUSES, WEBHOOK_EVENT_TYPES, isPrivateOrReservedHost } from '../domain/webhook';
 
 // Every namespace that appears in the event catalogue, so `invoice.*` can be
 // validated as a real subscription while `invoces.*` is caught at the API
@@ -34,7 +34,14 @@ const endpointUrlSchema = z
   .refine((value) => value.startsWith('http://') || value.startsWith('https://'), {
     message: 'Endpoint URL must use http or https',
   })
-  .refine((value) => value.length <= 2000, { message: 'Endpoint URL is too long' });
+  .refine((value) => value.length <= 2000, { message: 'Endpoint URL is too long' })
+  // Rejects loopback/private/link-local hosts up front, so an org can't
+  // register an endpoint that points our own delivery worker at internal
+  // infrastructure (see isPrivateOrReservedHost for what this does and
+  // doesn't cover).
+  .refine((value) => !isPrivateOrReservedHost(new URL(value).hostname), {
+    message: 'Endpoint URL may not point to a private, loopback, or link-local host',
+  });
 
 export const createWebhookEndpointSchema = z.object({
   url: endpointUrlSchema,

@@ -1,4 +1,5 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
+import net from 'node:net';
 
 // Everything about an outbound webhook that doesn't need a database or a
 // network: the catalogue of event types, which endpoint subscribes to what,
@@ -225,4 +226,62 @@ export function buildEventEnvelope(envelope: WebhookEventEnvelope): string {
 // failure worth retrying.
 export function isSuccessfulWebhookResponse(status: number): boolean {
   return status >= 200 && status < 300;
+}
+
+// Whether `hostname` names a loopback, private, link-local, or otherwise
+// non-public address. An endpoint registered with one of these would make
+// every delivery attempt (HttpWebhookTransport, triggered by any org that
+// can reach the create/update endpoint) an outbound request from our own
+// network to itself or another tenant's internal services — a classic SSRF
+// vector, not a configuration a real receiver ever needs. This checks the
+// literal hostname only, not what it resolves to: it stops the common case
+// (an IP literal, or `localhost`) without taking on asynchronous DNS lookups
+// in what is otherwise a synchronous validator.
+export function isPrivateOrReservedHost(hostname: string): boolean {
+  const host = hostname.toLowerCase();
+  if (host === 'localhost' || host.endsWith('.localhost')) {
+    return true;
+  }
+
+  if (net.isIPv4(host)) {
+    return isPrivateOrReservedIPv4(host);
+  }
+
+  if (net.isIPv6(host)) {
+    return isPrivateOrReservedIPv6(host);
+  }
+
+  return false;
+}
+
+function isPrivateOrReservedIPv4(ip: string): boolean {
+  const octets = ip.split('.').map(Number);
+  const a = octets[0] ?? 0;
+  const b = octets[1] ?? 0;
+
+  if (a === 0) return true; // 0.0.0.0/8 — "this network"
+  if (a === 10) return true; // 10.0.0.0/8 — private
+  if (a === 127) return true; // 127.0.0.0/8 — loopback
+  if (a === 169 && b === 254) return true; // 169.254.0.0/16 — link-local, incl. cloud metadata
+  if (a === 172 && b >= 16 && b <= 31) return true; // 172.16.0.0/12 — private
+  if (a === 192 && b === 168) return true; // 192.168.0.0/16 — private
+  if (a === 100 && b >= 64 && b <= 127) return true; // 100.64.0.0/10 — shared/CGNAT
+  if (a >= 224) return true; // 224.0.0.0/4 multicast + 240.0.0.0/4 reserved
+
+  return false;
+}
+
+function isPrivateOrReservedIPv6(ip: string): boolean {
+  const normalized = ip.toLowerCase();
+
+  if (normalized === '::' || normalized === '::1') return true; // unspecified / loopback
+  if (/^fe[89ab][0-9a-f]:/.test(normalized)) return true; // fe80::/10 — link-local
+  if (/^f[cd][0-9a-f]{2}:/.test(normalized)) return true; // fc00::/7 — unique local
+
+  const mapped = normalized.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+  if (mapped?.[1]) {
+    return isPrivateOrReservedIPv4(mapped[1]);
+  }
+
+  return false;
 }

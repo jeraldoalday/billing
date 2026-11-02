@@ -4,6 +4,7 @@ import {
   buildSignatureHeader,
   DEFAULT_SIGNATURE_TOLERANCE_SECONDS,
   eventMatchesFilter,
+  isPrivateOrReservedHost,
   isSuccessfulWebhookResponse,
   MAX_WEBHOOK_ATTEMPTS,
   nextWebhookAttemptAt,
@@ -211,5 +212,47 @@ describe('isSuccessfulWebhookResponse', () => {
     expect(isSuccessfulWebhookResponse(302)).toBe(false);
     expect(isSuccessfulWebhookResponse(410)).toBe(false);
     expect(isSuccessfulWebhookResponse(500)).toBe(false);
+  });
+});
+
+describe('isPrivateOrReservedHost', () => {
+  it('rejects localhost and its subdomains', () => {
+    expect(isPrivateOrReservedHost('localhost')).toBe(true);
+    expect(isPrivateOrReservedHost('LOCALHOST')).toBe(true);
+    expect(isPrivateOrReservedHost('app.localhost')).toBe(true);
+  });
+
+  it('rejects loopback, private, and link-local IPv4 addresses', () => {
+    expect(isPrivateOrReservedHost('127.0.0.1')).toBe(true);
+    expect(isPrivateOrReservedHost('10.0.0.5')).toBe(true);
+    expect(isPrivateOrReservedHost('172.16.0.1')).toBe(true);
+    expect(isPrivateOrReservedHost('172.31.255.255')).toBe(true);
+    expect(isPrivateOrReservedHost('192.168.1.1')).toBe(true);
+    expect(isPrivateOrReservedHost('169.254.169.254')).toBe(true); // cloud metadata
+    expect(isPrivateOrReservedHost('0.0.0.0')).toBe(true);
+    expect(isPrivateOrReservedHost('100.64.0.1')).toBe(true);
+  });
+
+  it('allows ordinary public IPv4 addresses', () => {
+    expect(isPrivateOrReservedHost('8.8.8.8')).toBe(false);
+    expect(isPrivateOrReservedHost('172.15.0.1')).toBe(false);
+    expect(isPrivateOrReservedHost('172.32.0.1')).toBe(false);
+  });
+
+  it('rejects loopback, link-local, and unique-local IPv6 addresses', () => {
+    expect(isPrivateOrReservedHost('::1')).toBe(true);
+    expect(isPrivateOrReservedHost('::')).toBe(true);
+    expect(isPrivateOrReservedHost('fe80::1')).toBe(true);
+    expect(isPrivateOrReservedHost('fd00::1')).toBe(true);
+  });
+
+  it('rejects an IPv4-mapped IPv6 address whose embedded address is private', () => {
+    expect(isPrivateOrReservedHost('::ffff:10.0.0.5')).toBe(true);
+    expect(isPrivateOrReservedHost('::ffff:8.8.8.8')).toBe(false);
+  });
+
+  it('allows an ordinary public hostname', () => {
+    expect(isPrivateOrReservedHost('example.com')).toBe(false);
+    expect(isPrivateOrReservedHost('hooks.example.com')).toBe(false);
   });
 });
