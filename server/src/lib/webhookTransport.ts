@@ -51,6 +51,13 @@ export class HttpWebhookTransport implements WebhookTransport {
         signal: controller.signal,
       });
 
+      // The status is all this cares about, but the body still has to be
+      // drained (or cancelled) before moving on — an unread response body
+      // keeps its connection out of the pool, so a webhook endpoint that
+      // keeps answering normally would still make every delivery open a
+      // fresh connection instead of reusing one.
+      await response.body?.cancel();
+
       if (isSuccessfulWebhookResponse(response.status)) {
         return { ok: true, status: response.status };
       }

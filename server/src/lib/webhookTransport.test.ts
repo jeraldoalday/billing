@@ -100,6 +100,20 @@ describe('HttpWebhookTransport', () => {
     expect(result).toEqual({ ok: false, status: 503, error: 'Endpoint responded with 503' });
   });
 
+  it('drains the response body instead of leaving it unread', async () => {
+    // Neither branch of send() does anything with the body content - only
+    // the status matters - so nothing else in this file would notice if it
+    // were left unread. An endpoint that keeps answering would then quietly
+    // stop having its connection reused, since the underlying socket can't
+    // go back into fetch's pool until the body is consumed or cancelled.
+    const response = new Response('{"received":true}', { status: 200 });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response));
+
+    await new HttpWebhookTransport().send(BASE_REQUEST);
+
+    expect(response.bodyUsed).toBe(true);
+  });
+
   it('does not follow a redirect', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(null, { status: 302 })));
 
