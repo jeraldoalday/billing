@@ -30,6 +30,21 @@ describe('detectCardBrand', () => {
     expect(detectCardBrand('6500000000000002')).toBe('DISCOVER');
   });
 
+  it('detects Discover numbers in the 644-649 range', () => {
+    expect(detectCardBrand('6440000000000000')).toBe('DISCOVER');
+    expect(detectCardBrand('6490000000000000')).toBe('DISCOVER');
+  });
+
+  it('detects Discover numbers in the 622126-622925 range', () => {
+    expect(detectCardBrand('6221260000000000')).toBe('DISCOVER');
+    expect(detectCardBrand('6229250000000000')).toBe('DISCOVER');
+  });
+
+  it('does not misclassify numbers just outside the 622126-622925 range', () => {
+    expect(detectCardBrand('6221250000000000')).toBe('UNKNOWN');
+    expect(detectCardBrand('6229260000000000')).toBe('UNKNOWN');
+  });
+
   it('falls back to UNKNOWN for anything else', () => {
     expect(detectCardBrand('9999999999999995')).toBe('UNKNOWN');
   });

@@ -20,11 +20,9 @@ export function detectCardBrand(cardNumber: string): CardBrand {
     return 'AMEX';
   }
   // Discover's two best-known prefixes: the original 6011 BIN and the
-  // later 65 range. (Like Mastercard's 2-series, Discover also carries a
-  // numeric 622126-622925 range and a 644-649 range; those are omitted
-  // here for the same "not exhaustive" reason the file-level comment
-  // already gives.)
-  if (/^(6011|65)\d*$/.test(cardNumber)) {
+  // later 65 range, plus the 644-649 range and the numeric 622126-622925
+  // range shared with China UnionPay co-branded cards.
+  if (/^(6011|65|64[4-9])\d*$/.test(cardNumber) || isDiscover622Series(cardNumber)) {
     return 'DISCOVER';
   }
   return 'UNKNOWN';
@@ -40,6 +38,16 @@ function isMastercard2Series(cardNumber: string): boolean {
   }
   const prefix = Number(cardNumber.slice(0, 4));
   return Number.isInteger(prefix) && prefix >= 2221 && prefix <= 2720;
+}
+
+// Discover's 622126-622925 range, carried over 6-digit BINs and so needing
+// the same numeric-prefix comparison as Mastercard's 2-series above.
+function isDiscover622Series(cardNumber: string): boolean {
+  if (cardNumber.length < 6) {
+    return false;
+  }
+  const prefix = Number(cardNumber.slice(0, 6));
+  return Number.isInteger(prefix) && prefix >= 622126 && prefix <= 622925;
 }
 
 export function lastFour(cardNumber: string): string {
